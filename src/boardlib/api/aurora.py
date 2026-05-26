@@ -2,6 +2,7 @@ import datetime
 import os
 import uuid
 
+import bs4
 import requests
 import pandas as pd
 
@@ -104,6 +105,34 @@ def get_user(board, token, user_id):
     response = requests.get(
         f"{WEB_HOSTS[board]}/users/{user_id}",
         headers={"cookie": f"token={token}"},
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def get_climb_stats(board, token, climb_uuid, angle):
+    response = requests.get(
+        f"{WEB_HOSTS[board]}/climbs/{climb_uuid}/stats",
+        params={"angle": angle},
+        headers={"cookie": f"token={token}"},
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def get_climb_name(board, climb_uuid):
+    response = requests.get(f"{WEB_HOSTS[board]}/climbs/{climb_uuid}")
+    response.raise_for_status()
+    soup = bs4.BeautifulSoup(response.text, "html.parser")
+    heading = soup.find("h1")
+    return heading.get_text(strip=True) if heading else None
+
+
+def user_sync(board, table_name, token):
+    response = requests.post(
+        f"{WEB_HOSTS[board]}/sync",
+        data={table_name: BASE_SYNC_DATE},
+        headers={"Cookie": f"token={token}"},
     )
     response.raise_for_status()
     return response.json()
@@ -581,19 +610,27 @@ def logbook_entries(board, token, db_path):
     )
     full_logbook_df["date"] = pd.to_datetime(full_logbook_df["date"])
 
-    full_logbook_df = (
-        full_logbook_df.groupby(["climb_name", "is_mirror", "angle"])
-        .apply(calculate_sessions_count)
-        .reset_index(drop=True)
+    if full_logbook_df.empty:
+        full_logbook_df["sessions_count"] = pd.Series(dtype="int")
+        full_logbook_df["tries_total"] = pd.Series(dtype="int")
+        full_logbook_df["is_repeat"] = pd.Series(dtype="bool")
+        return full_logbook_df
+
+    group_columns = ["climb_name", "is_mirror", "angle"]
+    full_logbook_df = full_logbook_df.sort_values(group_columns + ["date"])
+    full_logbook_df["_session_date"] = full_logbook_df["date"].dt.date
+    full_logbook_df["sessions_count"] = full_logbook_df.groupby(
+        group_columns, dropna=False
+    )["_session_date"].transform(
+        lambda session_dates: pd.factorize(session_dates)[0] + 1
     )
-    full_logbook_df = (
-        full_logbook_df.groupby(["climb_name", "is_mirror", "angle"])
-        .apply(calculate_tries_total)
-        .reset_index(drop=True)
-    )
+    full_logbook_df["tries_total"] = full_logbook_df.groupby(
+        group_columns, dropna=False
+    )["tries"].cumsum()
+    full_logbook_df = full_logbook_df.drop(columns=["_session_date"])
 
     full_logbook_df["is_repeat"] = full_logbook_df.duplicated(
-        subset=["climb_name", "is_mirror", "angle"], keep="first"
+        subset=group_columns, keep="first"
     )
     full_logbook_df = full_logbook_df.sort_values(by="date")
 

@@ -162,14 +162,15 @@ def logbook_entries(board, username, password, grade_type="font"):
     session = get_session(username, password)
     entries = raw_logbook_entries(session, board)
     for entry in entries:
-        font_logged_grade = entry["Problem"]["UserGrade"]
-        font_displayed_grade = entry["Problem"]["Grade"]
+        problem = entry["Problem"]
+        font_logged_grade = problem["UserGrade"]
+        font_displayed_grade = problem.get("Grade", font_logged_grade)
         yield {
             "board": board,
             "angle": IDS_TO_ANGLES[board][
-                entry["Problem"]["MoonBoardConfiguration"]["Id"]
+                problem["MoonBoardConfiguration"]["Id"]
             ],
-            "climb_name": entry["Problem"]["Name"],
+            "climb_name": problem["Name"],
             "date": datetime.datetime.strptime(entry["DateClimbedAsString"], "%d %b %Y")
             .date()
             .isoformat(),
@@ -183,10 +184,10 @@ def logbook_entries(board, username, password, grade_type="font"):
                 if grade_type == "font"
                 else boardlib.util.grades.FONT_TO_HUECO[font_logged_grade]
             ),
-            "is_benchmark": entry["Problem"]["IsBenchmark"],
+            "is_benchmark": problem.get("IsBenchmark", False),
             "tries": ATTEMPTS_TO_COUNT[entry["NumberOfTries"]],
             "is_mirror" : False,
-            "comment": entry["Comment"]
+            "comment": entry.get("Comment")
         }
 
 

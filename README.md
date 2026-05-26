@@ -40,6 +40,30 @@ This outputs a CSV file with the following fields:
 
 Currently all [Aurora Climbing](https://auroraclimbing.com/) based boards (Kilter, Tension, etc.) and the [Moonboard](https://moonboard.com/). The Moonboard web API currently appears to be broken for some iterations of the board, including 2016 and 2024.
 
+### Logbook Visualizer
+
+After exporting a logbook CSV, generate a standalone HTML session report with:
+
+```sh
+python tools/logbook_visualizer.py data/tension-logbook.csv -o data/tension-logbook-report.html
+```
+
+The report includes:
+
+- A session date picker.
+- Counts of climbs by logged grade for the selected day.
+- Session totals for ascents, unique climbs, tries, benchmarks, and repeats.
+- A copyable workout log summary for a training journal.
+- Per-session climb details and an all-sessions summary table.
+
+To preview the generated report locally:
+
+```sh
+python -m http.server 8765 --bind 127.0.0.1 --directory data
+```
+
+Then open `http://127.0.0.1:8765/tension-logbook-report.html` in a browser.
+
 ### Images 📸
 
 First, use the `database` command to download the SQLite database file for the board of interest. Then download the images for a given board:
