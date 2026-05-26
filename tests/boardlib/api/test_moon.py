@@ -209,12 +209,15 @@ class TestMoon(unittest.TestCase):
             next(boardlib.api.moon.logbook_entries("moon2016", "username", "password")),
             {
                 "board": "moon2016",
-                "grade": "7A",
                 "angle": 40,
-                "name": "test_name",
+                "climb_name": "test_name",
                 "date": "2023-09-05",
+                "displayed_grade": "7A",
+                "logged_grade": "7A",
+                "is_benchmark": False,
                 "tries": "1",
                 "is_mirror": False,
+                "comment": None,
             },
         )
 
