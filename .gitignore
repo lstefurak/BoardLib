@@ -6,3 +6,9 @@ dist
 __pycache__/
 data_cache
 data/
+build/
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars

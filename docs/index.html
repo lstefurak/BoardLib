@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Board Room</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="gate" id="gate">
+      <div>
+        <p class="eyebrow">after hours</p>
+        <h1>The Board Room</h1>
+        <p class="lede">Session notes for people who know what they are looking for.</p>
+      </div>
+      <form class="knock" id="knockForm">
+        <label for="knockInput">Knock</label>
+        <div class="inline-control">
+          <input id="knockInput" name="knock" type="password" autocomplete="off" placeholder="say the quiet part">
+          <button type="submit">Enter</button>
+        </div>
+        <p class="hint">The public page only opens the door. The API endpoint still decides who gets data.</p>
+      </form>
+    </section>
+
+    <section class="app is-hidden" id="app">
+      <header>
+        <div>
+          <p class="eyebrow">board log</p>
+          <h1>Session Visualizer</h1>
+          <p class="lede">Load a BoardLib CSV or ask a private export endpoint for one.</p>
+        </div>
+        <button class="ghost" id="lockButton">Lock</button>
+      </header>
+
+      <section class="panel">
+        <div class="tabs" role="tablist" aria-label="Data source">
+          <button class="tab is-active" type="button" data-tab="api">Connect</button>
+          <button class="tab" type="button" data-tab="csv">CSV</button>
+        </div>
+
+        <form class="source-grid" id="apiForm" data-panel="api">
+          <label>
+            Lambda Function URL
+            <input id="endpointInput" name="endpoint" type="url" placeholder="https://abc.lambda-url.us-east-1.on.aws/">
+          </label>
+          <label>
+            Username
+            <input id="usernameInput" name="username" autocomplete="username" placeholder="username">
+          </label>
+          <label>
+            Password
+            <input id="passwordInput" name="password" type="password" autocomplete="current-password" placeholder="password">
+          </label>
+          <button type="submit">Fetch Logbook</button>
+        </form>
+
+        <form class="source-grid is-hidden" id="csvForm" data-panel="csv">
+          <label>
+            BoardLib CSV
+            <input id="csvInput" name="csv" type="file" accept=".csv,text/csv">
+          </label>
+          <button type="submit">Load CSV</button>
+        </form>
+
+        <p class="status" id="status">No logbook loaded.</p>
+      </section>
+
+      <section class="dashboard is-hidden" id="dashboard">
+        <div class="toolbar">
+          <button class="icon-button" id="prevDay" type="button" title="Previous session" aria-label="Previous session">&lt;</button>
+          <select id="sessionSelect" aria-label="Session date"></select>
+          <button class="icon-button" id="nextDay" type="button" title="Next session" aria-label="Next session">&gt;</button>
+        </div>
+
+        <div class="stats" id="stats"></div>
+
+        <section class="analysis">
+          <div>
+            <h2>Logged Grade Counts</h2>
+            <div class="chart" id="gradeChart"></div>
+          </div>
+          <div class="log-panel">
+            <div class="log-toolbar">
+              <h2>Workout Log</h2>
+              <button class="ghost" id="copyLog" type="button">Copy</button>
+            </div>
+            <pre id="workoutLog"></pre>
+          </div>
+        </section>
+
+        <section>
+          <h2>Climbs</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Climb</th>
+                  <th>Grade</th>
+                  <th>Angle</th>
+                  <th>Tries</th>
+                  <th>Type</th>
+                </tr>
+              </thead>
+              <tbody id="climbRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </section>
+  </main>
+  <script src="site.config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
