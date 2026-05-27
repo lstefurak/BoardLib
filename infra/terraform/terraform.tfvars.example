@@ -1,0 +1,7 @@
+allowed_origin      = "https://your-user.github.io"
+boardlog_access_key = "change-me"
+
+# Optional:
+# aws_region       = "us-east-1"
+# function_name    = "boardlog-exporter"
+# lambda_zip_path  = "../../build/boardlog-lambda.zip"
