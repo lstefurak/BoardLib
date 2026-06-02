@@ -20,7 +20,7 @@
           <input id="knockInput" name="knock" type="password" autocomplete="off" placeholder="say the quiet part">
           <button type="submit">Enter</button>
         </div>
-        <p class="hint">The public page only opens the door. The API endpoint still decides who gets data.</p>
+        <p class="hint">The phrase is checked by the backend, not this page. Nothing secret is stored here.</p>
       </form>
     </section>
 
@@ -44,6 +44,10 @@
           <label>
             Lambda Function URL
             <input id="endpointInput" name="endpoint" type="url" placeholder="https://abc.lambda-url.us-east-1.on.aws/">
+          </label>
+          <label>
+            Access key
+            <input id="accessKeyInput" name="accessKey" type="password" autocomplete="off" placeholder="backend access key">
           </label>
           <label>
             Username

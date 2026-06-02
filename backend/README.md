@@ -9,7 +9,13 @@ This backend is designed for an AWS Lambda Function URL. The GitHub Pages UI sen
 Headers:
 
 - `Content-Type: application/json`
-- `X-Board-Room-Key: <shared access key>` if `BOARDLOG_ACCESS_KEY` is configured
+- `X-Board-Gate: <gate phrase>` if a gate phrase is configured
+- `X-Board-Room-Key: <access key>` if an access key is configured
+
+Both secrets are independent and verified server-side with a constant-time
+compare. A `POST` body of `{"action": "unlock"}` with a valid `X-Board-Gate`
+header returns `{"ok": true}` and is used by the page's gate button; the export
+path additionally requires `X-Board-Room-Key`.
 
 Body:
 
@@ -51,7 +57,9 @@ Body:
 ## Environment Variables
 
 - `ALLOWED_ORIGIN`: GitHub Pages origin allowed by CORS, for example `https://your-user.github.io`.
-- `BOARDLOG_ACCESS_KEY`: Optional shared key required in `X-Board-Room-Key`.
+- `BOARDLOG_ACCESS_KEY_PARAM`: SSM SecureString parameter name holding the access key (production). Read at runtime and decrypted.
+- `BOARDLOG_GATE_PHRASE_PARAM`: SSM SecureString parameter name holding the gate phrase (production).
+- `BOARDLOG_ACCESS_KEY` / `BOARDLOG_GATE_PHRASE`: Plaintext fallbacks for local/dev/tests. Take precedence over the SSM parameters when set. Each check is disabled if neither the env var nor the parameter is configured.
 - `BOARDLOG_CACHE_DIR`: Optional database cache directory. Defaults to `/tmp/boardlog`.
 - `BOARDLOG_MAX_SYNC_PAGES`: Optional shared database sync page cap. Defaults to `100`.
 - `BOARDLOG_ALLOWED_BOARDS`: Optional comma-separated board names. Defaults to `tension`.
