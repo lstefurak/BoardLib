@@ -7,6 +7,8 @@ This Terraform creates the AWS side of the BoardLog app:
 - Python Lambda function
 - Lambda Function URL with CORS restricted to your GitHub Pages origin
 - A resource-based permission allowing public invoke of the Function URL
+- CloudWatch metric filters and a dashboard for invocations, success rate, and
+  per-username usage
 
 ## Security model
 
@@ -83,7 +85,26 @@ terraform apply
 ```
 
 Terraform prints `function_url`. Put that URL (it is not a secret) in
-`docs/site.config.js` as `defaultEndpoint`.
+`docs/site.config.js` as `defaultEndpoint`. It also prints `dashboard_url` for
+the CloudWatch dashboard described below.
+
+## Monitoring
+
+The handler emits one structured JSON line per request, e.g.:
+
+```json
+{"type": "boardlog_request", "status": 200, "ok": true, "action": "export", "username": "alice", "board": "tension", "row_count": 270}
+```
+
+The password and the gate/access secrets are never logged. From these lines
+`monitoring.tf` builds:
+
+- **Metric filters** (`BoardLog` namespace): `ExportRequests`, `ExportSuccess`,
+  `AuthFailures` (403), `ServerErrors` (502).
+- **A dashboard** (`<function_name>-overview`, see the `dashboard_url` output)
+  showing the export success rate, requests vs successes, rejections/errors,
+  Lambda invocations/errors/throttles, p50/p99 duration, and Logs Insights
+  tables of invocations by username and recent export attempts.
 
 ## Notes
 

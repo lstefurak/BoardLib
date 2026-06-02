@@ -33,52 +33,58 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     if method == "OPTIONS":
         return response(204, "")
     if method != "POST":
-        return response(405, {"error": "Method not allowed"})
+        return log_and_respond(405, {"error": "Method not allowed"})
 
     try:
         body = parse_body(event)
     except ValueError as error:
-        return response(400, {"error": str(error)})
+        return log_and_respond(400, {"error": str(error)})
 
     action = str(body.get("action", "")).strip().lower()
+    board = str(body.get("board", "tension")).strip().lower()
+    username = str(body.get("username", "")).strip()
 
     try:
         # The gate "Enter" button verifies only the gate phrase, server-side.
         if action == "unlock":
             if check_secret(event, GATE_HEADER, GATE_SECRET):
-                return response(200, {"ok": True})
-            return response(403, {"error": "The door stays shut."})
+                return log_and_respond(200, {"ok": True}, action="unlock")
+            return log_and_respond(403, {"error": "The door stays shut."}, action="unlock")
 
-        # The export path requires both independent secrets to check out.
-        if not check_secret(event, GATE_HEADER, GATE_SECRET):
-            return response(403, {"error": "The door stays shut."})
-        if not check_secret(event, ACCESS_KEY_HEADER, ACCESS_SECRET):
-            return response(403, {"error": "Not invited"})
+        # The export path requires both independent secrets. Evaluate both and
+        # return one generic error so the response doesn't reveal which secret
+        # was wrong.
+        gate_ok = check_secret(event, GATE_HEADER, GATE_SECRET)
+        key_ok = check_secret(event, ACCESS_KEY_HEADER, ACCESS_SECRET)
+        if not (gate_ok and key_ok):
+            return log_and_respond(403, {"error": "Not authorized"}, action="export", username=username, board=board)
 
-        board = str(body.get("board", "tension")).strip().lower()
-        username = str(body.get("username", "")).strip()
         password = str(body.get("password", ""))
 
         if board not in allowed_boards():
-            return response(400, {"error": f"Unsupported board: {board}"})
+            return log_and_respond(400, {"error": f"Unsupported board: {board}"}, action="export", username=username, board=board)
         if not username or not password:
-            return response(400, {"error": "Username and password are required"})
+            return log_and_respond(400, {"error": "Username and password are required"}, action="export", username=username, board=board)
 
         rows = export_logbook(board, username, password)
-        return response(
+        return log_and_respond(
             200,
             {
                 "board": board,
                 "row_count": len(rows),
                 "rows": rows,
             },
+            action="export",
+            username=username,
+            board=board,
+            row_count=len(rows),
         )
     except ValueError as error:
-        return response(400, {"error": str(error)})
+        return log_and_respond(400, {"error": str(error)}, action="export", username=username, board=board)
     except Exception as error:
         print("BoardLog export failed:", type(error).__name__, str(error))
         print(traceback.format_exc())
-        return response(502, {"error": "Export failed"})
+        return log_and_respond(502, {"error": "Export failed"}, action="export", username=username, board=board)
 
 
 def parse_body(event: dict[str, Any]) -> dict[str, Any]:
@@ -171,6 +177,37 @@ def ensure_database(board: str, db_path: pathlib.Path, username: str, password: 
     ):
         boardlib.db.aurora.sync_shared_tables(db_path, sync_result)
     return token
+
+
+def log_and_respond(
+    status_code: int,
+    body: Any,
+    *,
+    action: str = "",
+    username: str = "",
+    board: str = "",
+    row_count: int | None = None,
+) -> dict[str, Any]:
+    """Emit one structured request log line, then return the HTTP response.
+
+    The line is JSON so CloudWatch metric filters and Logs Insights can break
+    invocations down by outcome and by username. The password and the gate /
+    access secrets are never included.
+    """
+    print(
+        json.dumps(
+            {
+                "type": "boardlog_request",
+                "status": status_code,
+                "ok": status_code == 200,
+                "action": action or None,
+                "username": username or None,
+                "board": board or None,
+                "row_count": row_count,
+            }
+        )
+    )
+    return response(status_code, body)
 
 
 def response(status_code: int, body: Any) -> dict[str, Any]:
