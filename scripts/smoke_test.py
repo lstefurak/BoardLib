@@ -51,6 +51,8 @@ def post(endpoint: str, body: dict, headers: dict) -> tuple[int, str]:
             return response.status, response.read().decode("utf-8")
     except urllib.error.HTTPError as error:
         return error.code, error.read().decode("utf-8")
+    except (urllib.error.URLError, TimeoutError) as error:
+        return 0, f"request failed: {error}"
 
 
 def main() -> int:

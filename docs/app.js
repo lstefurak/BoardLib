@@ -1,7 +1,6 @@
 const config = window.BOARDLOG_CONFIG || {};
 const state = {
   gate: "",
-  accessKey: "",
   rows: [],
   sessions: [],
   gradeOrder: [],
@@ -49,7 +48,6 @@ async function unlock(phrase) {
 
 function lock() {
   state.gate = "";
-  state.accessKey = "";
   sessionStorage.removeItem("boardlog:gate");
   sessionStorage.removeItem("boardlog:key");
   $("app").classList.add("is-hidden");
@@ -327,7 +325,6 @@ $("apiForm").addEventListener("submit", async (event) => {
     return;
   }
   const accessKey = $("accessKeyInput").value.trim();
-  state.accessKey = accessKey;
   sessionStorage.setItem("boardlog:key", accessKey);
   setStatus("Requesting export...");
   try {
@@ -396,7 +393,6 @@ if (config.defaultEndpoint) {
 
 const storedKey = sessionStorage.getItem("boardlog:key");
 if (storedKey) {
-  state.accessKey = storedKey;
   $("accessKeyInput").value = storedKey;
 }
 

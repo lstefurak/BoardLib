@@ -56,7 +56,6 @@ Body:
 
 ## Environment Variables
 
-- `ALLOWED_ORIGIN`: GitHub Pages origin allowed by CORS, for example `https://your-user.github.io`.
 - `BOARDLOG_ACCESS_KEY_PARAM`: SSM SecureString parameter name holding the access key (production). Read at runtime and decrypted.
 - `BOARDLOG_GATE_PHRASE_PARAM`: SSM SecureString parameter name holding the gate phrase (production).
 - `BOARDLOG_ACCESS_KEY` / `BOARDLOG_GATE_PHRASE`: Plaintext fallbacks for local/dev/tests. Take precedence over the SSM parameters when set. Each check is disabled if neither the env var nor the parameter is configured.
