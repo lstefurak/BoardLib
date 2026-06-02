@@ -101,7 +101,9 @@ def check_secret(event: dict[str, Any], header: str, secret_source: tuple[str, s
     if not expected:
         return True
     provided = request_header(event, header)
-    return hmac.compare_digest(str(provided), str(expected))
+    # Encode to bytes: hmac.compare_digest raises TypeError on non-ASCII str,
+    # which would turn a non-ASCII passphrase into a 502 for every request.
+    return hmac.compare_digest(str(provided).encode("utf-8"), str(expected).encode("utf-8"))
 
 
 def resolve_secret(plain_env: str, param_env: str) -> str | None:

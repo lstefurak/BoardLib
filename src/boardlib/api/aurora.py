@@ -206,10 +206,6 @@ def download_images(board, database_path, output_directory, composite=False):
     :param output_directory: Directory to save the downloaded images
     :param composite: If true, build composite layout images for each board layout
     """
-    # Imported lazily so callers that only need logbook/database features (e.g.
-    # the Lambda backend) do not require Pillow to be installed.
-    import boardlib.util.images
-
     os.makedirs(output_directory, exist_ok=True)
     image_filenames = boardlib.db.aurora.get_image_filenames(database_path)
     api_host = f"https://api.{HOST_BASES[board]}.com"
@@ -232,7 +228,12 @@ def download_images(board, database_path, output_directory, composite=False):
         with open(output_path, "wb") as output_file:
             output_file.write(response.content)
 
-    if (composite):  
+    if (composite):
+        # Imported lazily so callers that only need logbook/database features
+        # (e.g. the Lambda backend, or non-composite downloads) do not require
+        # Pillow to be installed.
+        import boardlib.util.images
+
         # Get the layouts-image-path dict from the database
         layouts_images_dict = boardlib.db.aurora.get_layouts_images_dict(database_path)
         

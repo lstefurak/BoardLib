@@ -91,7 +91,8 @@ resource "aws_lambda_function" "boardlog" {
 
   environment {
     variables = {
-      ALLOWED_ORIGIN             = var.allowed_origin
+      # CORS (allowed origin) is configured on the Function URL below, not read
+      # by the handler — so ALLOWED_ORIGIN is intentionally not passed here.
       BOARDLOG_ACCESS_KEY_PARAM  = var.access_key_param_name
       BOARDLOG_GATE_PHRASE_PARAM = var.gate_phrase_param_name
       BOARDLOG_ALLOWED_BOARDS    = var.allowed_boards

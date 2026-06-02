@@ -109,12 +109,14 @@ backend.boardlog_lambda.handler.lambda_handler
 Recommended environment variables:
 
 ```text
-ALLOWED_ORIGIN=https://your-user.github.io
 BOARDLOG_ACCESS_KEY_PARAM=/boardlog/access-key
 BOARDLOG_GATE_PHRASE_PARAM=/boardlog/gate-phrase
 BOARDLOG_ALLOWED_BOARDS=tension
 BOARDLOG_MAX_SYNC_PAGES=100
 ```
+
+(The allowed CORS origin is set on the Function URL via the `allowed_origin`
+terraform variable, not as a Lambda env var.)
 
 The access key and gate phrase live in SSM SecureString parameters (KMS-encrypted),
 created out-of-band so their plaintext never enters terraform state. See
