@@ -84,7 +84,7 @@ independently. Configure only the (non-secret) endpoint in `docs/site.config.js`
 
 ```js
 window.BOARDLOG_CONFIG = {
-  defaultEndpoint: "https://your-lambda-url.lambda-url.us-east-1.on.aws/",
+  defaultEndpoint: "https://your-url-id.lambda-url.<region>.on.aws/",
 };
 ```
 
