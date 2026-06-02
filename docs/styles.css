@@ -331,3 +331,24 @@ th {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.reveal-toggle {
+  margin-top: 4px;
+  padding: 3px 10px;
+  width: max-content;
+  font-size: 12px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.reveal-toggle:hover {
+  color: var(--ink);
+}
+
+.inline-control .reveal-toggle {
+  margin-top: 0;
+  align-self: center;
+}

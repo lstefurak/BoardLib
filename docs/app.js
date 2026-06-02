@@ -1,6 +1,6 @@
 const config = window.BOARDLOG_CONFIG || {};
 const state = {
-  knock: "",
+  gate: "",
   rows: [],
   sessions: [],
   gradeOrder: [],
@@ -15,28 +15,41 @@ function setStatus(message, tone = "muted") {
   status.style.color = tone === "error" ? "#8a1f11" : tone === "good" ? "#0f766e" : "";
 }
 
-async function sha256(text) {
-  const bytes = new TextEncoder().encode(text);
-  const hash = await crypto.subtle.digest("SHA-256", bytes);
-  return [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+function currentEndpoint() {
+  return ($("endpointInput").value || config.defaultEndpoint || "").trim();
 }
 
-async function unlock(knock) {
-  if (config.gateHash) {
-    const hash = await sha256(knock);
-    if (hash !== config.gateHash) {
-      throw new Error("The door stays shut.");
-    }
-  }
-  state.knock = knock;
-  sessionStorage.setItem("boardlog:knock", knock);
+// The Function URL is public; the gate phrase and access key are sent as
+// headers and verified server-side by the Lambda. The page stores no secrets.
+async function callBackend(endpoint, bodyObj, extraHeaders = {}) {
+  return fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...extraHeaders },
+    body: JSON.stringify(bodyObj),
+  });
+}
+
+async function verifyGate(phrase) {
+  const endpoint = currentEndpoint();
+  // CSV-only use has no backend and nothing to protect, so open the door locally.
+  if (!endpoint) return;
+  const response = await callBackend(endpoint, { action: "unlock" }, { "X-Board-Gate": phrase });
+  if (response.status === 403) throw new Error("The door stays shut.");
+  if (!response.ok) throw new Error(`Gate check failed (HTTP ${response.status}).`);
+}
+
+async function unlock(phrase) {
+  await verifyGate(phrase);
+  state.gate = phrase;
+  sessionStorage.setItem("boardlog:gate", phrase);
   $("gate").classList.add("is-hidden");
   $("app").classList.remove("is-hidden");
 }
 
 function lock() {
-  state.knock = "";
-  sessionStorage.removeItem("boardlog:knock");
+  state.gate = "";
+  sessionStorage.removeItem("boardlog:gate");
+  sessionStorage.removeItem("boardlog:key");
   $("app").classList.add("is-hidden");
   $("gate").classList.remove("is-hidden");
   $("knockInput").value = "";
@@ -241,6 +254,15 @@ function renderSessionOptions() {
   )).join("");
 }
 
+// Climb names, grades, and comments come from shared-board content authored by
+// other users, so escape them before they go into innerHTML.
+function escapeHtml(value) {
+  return String(value ?? "").replace(
+    /[&<>"']/g,
+    (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]),
+  );
+}
+
 function render() {
   const session = state.sessions[state.selectedIndex];
   $("sessionSelect").value = String(state.selectedIndex);
@@ -263,7 +285,7 @@ function render() {
       const count = session.grade_counts[grade];
       const width = Math.max(4, Math.round((count / maxCount) * 100));
       return `<div class="bar-row">
-        <div class="bar-label">${grade}</div>
+        <div class="bar-label">${escapeHtml(grade)}</div>
         <div class="bar-track"><div class="bar" style="width:${width}%"></div></div>
         <div class="bar-count">${count}</div>
       </div>`;
@@ -273,8 +295,8 @@ function render() {
   $("climbRows").innerHTML = currentSessionRows().map((row) => (
     `<tr>
       <td>${formatTime(row.date)}</td>
-      <td>${row.climb_name}${row.is_mirror ? " (mirror)" : ""}</td>
-      <td>${row.logged_grade}</td>
+      <td>${escapeHtml(row.climb_name)}${row.is_mirror ? " (mirror)" : ""}</td>
+      <td>${escapeHtml(row.logged_grade)}</td>
       <td>${row.angle}</td>
       <td>${row.tries}</td>
       <td>${row.is_ascent ? "send" : "attempt"}${row.is_benchmark ? ", benchmark" : ""}</td>
@@ -306,25 +328,27 @@ document.querySelectorAll(".tab").forEach((tab) => {
 
 $("apiForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const endpoint = $("endpointInput").value.trim();
+  const endpoint = currentEndpoint();
   if (!endpoint) {
     setStatus("Add a private export endpoint first.", "error");
     return;
   }
+  const accessKey = $("accessKeyInput").value.trim();
+  sessionStorage.setItem("boardlog:key", accessKey);
   setStatus("Requesting export...");
   try {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Board-Room-Key": state.knock,
-      },
-      body: JSON.stringify({
+    const response = await callBackend(
+      endpoint,
+      {
         board: "tension",
         username: $("usernameInput").value.trim(),
         password: $("passwordInput").value,
-      }),
-    });
+      },
+      { "X-Board-Gate": state.gate, "X-Board-Room-Key": accessKey },
+    );
+    if (response.status === 403) {
+      throw new Error("Backend rejected the gate phrase or access key (403).");
+    }
     if (!response.ok) throw new Error(`Export failed with HTTP ${response.status}`);
     const payload = await response.json();
     loadJsonPayload(payload, "private export endpoint");
@@ -376,7 +400,27 @@ if (config.defaultEndpoint) {
   $("endpointInput").value = config.defaultEndpoint;
 }
 
-const storedKnock = sessionStorage.getItem("boardlog:knock");
-if (storedKnock) {
-  unlock(storedKnock).catch(() => lock());
+const storedKey = sessionStorage.getItem("boardlog:key");
+if (storedKey) {
+  $("accessKeyInput").value = storedKey;
 }
+
+const storedGate = sessionStorage.getItem("boardlog:gate");
+if (storedGate) {
+  unlock(storedGate).catch(() => lock());
+}
+
+// Add a show/hide toggle to every password field.
+document.querySelectorAll('input[type="password"]').forEach((input) => {
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "reveal-toggle";
+  toggle.textContent = "Show";
+  toggle.setAttribute("aria-label", "Show or hide the value");
+  toggle.addEventListener("click", () => {
+    const reveal = input.type === "password";
+    input.type = reveal ? "text" : "password";
+    toggle.textContent = reveal ? "Hide" : "Show";
+  });
+  input.insertAdjacentElement("afterend", toggle);
+});

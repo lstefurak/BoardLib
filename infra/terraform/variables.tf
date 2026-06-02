@@ -33,10 +33,16 @@ variable "allowed_origin" {
   type        = string
 }
 
-variable "boardlog_access_key" {
-  description = "Shared access key required in the X-Board-Room-Key request header."
+variable "access_key_param_name" {
+  description = "SSM SecureString parameter name holding the backend access key (X-Board-Room-Key)."
   type        = string
-  sensitive   = true
+  default     = "/boardlog/access-key"
+}
+
+variable "gate_phrase_param_name" {
+  description = "SSM SecureString parameter name holding the page gate phrase (X-Board-Gate)."
+  type        = string
+  default     = "/boardlog/gate-phrase"
 }
 
 variable "allowed_boards" {
@@ -61,6 +67,12 @@ variable "memory_size_mb" {
   description = "Lambda memory size in MB."
   type        = number
   default     = 1024
+}
+
+variable "reserved_concurrency" {
+  description = "Max concurrent Lambda executions (caps cost/abuse on the public URL)."
+  type        = number
+  default     = 5
 }
 
 variable "log_retention_days" {

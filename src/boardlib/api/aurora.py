@@ -7,7 +7,6 @@ import requests
 import pandas as pd
 
 import boardlib.db.aurora
-import boardlib.util.images
 
 
 BASE_SYNC_DATE = "1970-01-01 00:00:00.000000"
@@ -229,7 +228,12 @@ def download_images(board, database_path, output_directory, composite=False):
         with open(output_path, "wb") as output_file:
             output_file.write(response.content)
 
-    if (composite):  
+    if (composite):
+        # Imported lazily so callers that only need logbook/database features
+        # (e.g. the Lambda backend, or non-composite downloads) do not require
+        # Pillow to be installed.
+        import boardlib.util.images
+
         # Get the layouts-image-path dict from the database
         layouts_images_dict = boardlib.db.aurora.get_layouts_images_dict(database_path)
         

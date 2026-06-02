@@ -1,6 +1,7 @@
 .venv
 .vscode
 .DS_STORE
+.env
 tmp
 dist
 __pycache__/
