@@ -172,22 +172,13 @@ def ensure_database(board: str, db_path: pathlib.Path, username: str, password: 
 
 
 def response(status_code: int, body: Any) -> dict[str, Any]:
-    headers = cors_headers()
+    # CORS headers are added by the Lambda Function URL's own CORS config. The
+    # handler must NOT also emit Access-Control-* headers, or the browser sees
+    # duplicate Access-Control-Allow-Origin values and blocks the response.
     if body == "":
-        return {"statusCode": status_code, "headers": headers, "body": ""}
-    headers["Content-Type"] = "application/json"
+        return {"statusCode": status_code, "headers": {}, "body": ""}
     return {
         "statusCode": status_code,
-        "headers": headers,
+        "headers": {"Content-Type": "application/json"},
         "body": json.dumps(body),
-    }
-
-
-def cors_headers() -> dict[str, str]:
-    origin = os.environ.get("ALLOWED_ORIGIN", "*")
-    return {
-        "Access-Control-Allow-Origin": origin,
-        "Access-Control-Allow-Headers": "Content-Type,X-Board-Room-Key,X-Board-Gate",
-        "Access-Control-Allow-Methods": "OPTIONS,POST",
-        "Vary": "Origin",
     }

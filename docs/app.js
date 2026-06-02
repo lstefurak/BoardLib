@@ -404,3 +404,18 @@ const storedGate = sessionStorage.getItem("boardlog:gate");
 if (storedGate) {
   unlock(storedGate).catch(() => lock());
 }
+
+// Add a show/hide toggle to every password field.
+document.querySelectorAll('input[type="password"]').forEach((input) => {
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "reveal-toggle";
+  toggle.textContent = "Show";
+  toggle.setAttribute("aria-label", "Show or hide the value");
+  toggle.addEventListener("click", () => {
+    const reveal = input.type === "password";
+    input.type = reveal ? "text" : "password";
+    toggle.textContent = reveal ? "Hide" : "Show";
+  });
+  input.insertAdjacentElement("afterend", toggle);
+});

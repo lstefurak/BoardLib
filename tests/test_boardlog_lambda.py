@@ -26,9 +26,11 @@ class TestBoardLogLambda(unittest.TestCase):
         }
 
     def test_options_preflight(self):
+        # CORS (incl. preflight) is handled by the Function URL config, not the
+        # handler — the handler must not emit Access-Control-* headers.
         response = handler.lambda_handler(self.event(method="OPTIONS"), None)
         self.assertEqual(response["statusCode"], 204)
-        self.assertEqual(response["headers"]["Access-Control-Allow-Methods"], "OPTIONS,POST")
+        self.assertNotIn("Access-Control-Allow-Origin", response["headers"])
 
     def test_requires_access_key_when_configured(self):
         os.environ["BOARDLOG_ACCESS_KEY"] = "secret"
