@@ -1,7 +1,13 @@
-allowed_origin      = "https://your-user.github.io"
-boardlog_access_key = "change-me"
+allowed_origin = "https://your-user.github.io"
+
+# Secrets are NOT set here. The gate phrase and access key live in SSM
+# SecureString parameters created out-of-band (see README.md), so their
+# plaintext never enters terraform state. Only override the parameter names
+# below if you used non-default names.
 
 # Optional:
-# aws_region       = "us-east-1"
-# function_name    = "boardlog-exporter"
-# lambda_zip_path  = "../../build/boardlog-lambda.zip"
+# aws_region             = "us-east-1"
+# function_name          = "boardlog-exporter"
+# lambda_zip_path        = "../../build/boardlog-lambda.zip"
+# access_key_param_name  = "/boardlog/access-key"
+# gate_phrase_param_name = "/boardlog/gate-phrase"

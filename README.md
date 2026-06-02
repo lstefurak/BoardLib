@@ -68,22 +68,25 @@ Then open `http://127.0.0.1:8765/tension-logbook-report.html` in a browser.
 
 The `docs/` folder contains a static GitHub Pages app called "The Board Room." It can load a local BoardLib CSV in the browser, or call a private AWS Lambda Function URL that returns JSON logbook rows.
 
-The static page is intentionally only a client:
+The static page holds **no secrets** — all GitHub Pages JavaScript is public, so
+nothing secret can be hidden there, encrypted or otherwise. Security is enforced
+entirely by the Lambda backend.
 
-- It can hide the UI behind a soft "knock" phrase.
-- It can send a shared `X-Board-Room-Key` header to the backend.
-- It cannot safely protect secrets by itself because all GitHub Pages JavaScript is public.
+There are two independent secrets, both typed at runtime and verified
+server-side against KMS-encrypted SSM parameters:
 
-Configure the page in `docs/site.config.js`:
+- A **gate phrase** (`X-Board-Gate`) that unlocks the page UI. The gate button
+  asks the Lambda to verify it, so the door is real, not cosmetic.
+- An **access key** (`X-Board-Room-Key`) required for the actual export.
+
+Because they are separate, the gate phrase and access key can be rotated
+independently. Configure only the (non-secret) endpoint in `docs/site.config.js`:
 
 ```js
 window.BOARDLOG_CONFIG = {
-  gateHash: "",
   defaultEndpoint: "https://your-lambda-url.lambda-url.us-east-1.on.aws/",
 };
 ```
-
-The optional `gateHash` is a SHA-256 hash of the knock phrase. Leave it blank to let any phrase open the UI. Real access control should happen in the Lambda backend with `BOARDLOG_ACCESS_KEY`.
 
 To preview the Pages app locally:
 
@@ -107,10 +110,15 @@ Recommended environment variables:
 
 ```text
 ALLOWED_ORIGIN=https://your-user.github.io
-BOARDLOG_ACCESS_KEY=<shared backend access key>
+BOARDLOG_ACCESS_KEY_PARAM=/boardlog/access-key
+BOARDLOG_GATE_PHRASE_PARAM=/boardlog/gate-phrase
 BOARDLOG_ALLOWED_BOARDS=tension
 BOARDLOG_MAX_SYNC_PAGES=100
 ```
+
+The access key and gate phrase live in SSM SecureString parameters (KMS-encrypted),
+created out-of-band so their plaintext never enters terraform state. See
+`infra/terraform/README.md` for creation and independent rotation.
 
 Request body:
 

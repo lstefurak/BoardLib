@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import pathlib
@@ -15,6 +16,17 @@ import boardlib.db.aurora
 
 DEFAULT_ALLOWED_BOARDS = {"tension"}
 
+GATE_HEADER = "x-board-gate"
+ACCESS_KEY_HEADER = "x-board-room-key"
+
+# Two independent secrets, each resolved from a direct env var (local/dev/tests)
+# or an SSM SecureString named by the *_PARAM env var (production). Keeping them
+# separate lets the gate phrase and the access key be rotated independently.
+GATE_SECRET = ("BOARDLOG_GATE_PHRASE", "BOARDLOG_GATE_PHRASE_PARAM")
+ACCESS_SECRET = ("BOARDLOG_ACCESS_KEY", "BOARDLOG_ACCESS_KEY_PARAM")
+
+_secret_cache: dict[str, str] = {}
+
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     method = event.get("requestContext", {}).get("http", {}).get("method", event.get("httpMethod", ""))
@@ -23,11 +35,26 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     if method != "POST":
         return response(405, {"error": "Method not allowed"})
 
-    if not authorized(event):
-        return response(403, {"error": "Not invited"})
-
     try:
         body = parse_body(event)
+    except ValueError as error:
+        return response(400, {"error": str(error)})
+
+    action = str(body.get("action", "")).strip().lower()
+
+    try:
+        # The gate "Enter" button verifies only the gate phrase, server-side.
+        if action == "unlock":
+            if check_secret(event, GATE_HEADER, GATE_SECRET):
+                return response(200, {"ok": True})
+            return response(403, {"error": "The door stays shut."})
+
+        # The export path requires both independent secrets to check out.
+        if not check_secret(event, GATE_HEADER, GATE_SECRET):
+            return response(403, {"error": "The door stays shut."})
+        if not check_secret(event, ACCESS_KEY_HEADER, ACCESS_SECRET):
+            return response(403, {"error": "Not invited"})
+
         board = str(body.get("board", "tension")).strip().lower()
         username = str(body.get("username", "")).strip()
         password = str(body.get("password", ""))
@@ -64,14 +91,46 @@ def parse_body(event: dict[str, Any]) -> dict[str, Any]:
     return parsed
 
 
-def authorized(event: dict[str, Any]) -> bool:
-    expected = os.environ.get("BOARDLOG_ACCESS_KEY")
+def check_secret(event: dict[str, Any], header: str, secret_source: tuple[str, str]) -> bool:
+    """Constant-time check of a request header against a configured secret.
+
+    Returns True when the secret is not configured at all, so a check can be
+    disabled simply by leaving both its env var and SSM parameter unset.
+    """
+    expected = resolve_secret(*secret_source)
     if not expected:
         return True
+    provided = request_header(event, header)
+    return hmac.compare_digest(str(provided), str(expected))
 
+
+def resolve_secret(plain_env: str, param_env: str) -> str | None:
+    """Resolve a secret from a direct env var, else an SSM SecureString.
+
+    ``plain_env`` is read first so local runs and tests can set the value
+    directly. In production only ``param_env`` (the SSM parameter name) is set,
+    and the decrypted value is fetched once and cached for the warm container.
+    """
+    direct = os.environ.get(plain_env)
+    if direct:
+        return direct
+
+    param_name = os.environ.get(param_env)
+    if not param_name:
+        return None
+
+    if param_name not in _secret_cache:
+        import boto3  # provided by the Lambda runtime; not bundled
+
+        client = boto3.client("ssm")
+        value = client.get_parameter(Name=param_name, WithDecryption=True)
+        _secret_cache[param_name] = value["Parameter"]["Value"]
+    return _secret_cache[param_name]
+
+
+def request_header(event: dict[str, Any], name: str) -> str:
     headers = {str(k).lower(): v for k, v in (event.get("headers") or {}).items()}
-    provided = headers.get("x-board-room-key", "")
-    return provided == expected
+    return headers.get(name.lower(), "") or ""
 
 
 def allowed_boards() -> set[str]:
@@ -128,7 +187,7 @@ def cors_headers() -> dict[str, str]:
     origin = os.environ.get("ALLOWED_ORIGIN", "*")
     return {
         "Access-Control-Allow-Origin": origin,
-        "Access-Control-Allow-Headers": "Content-Type,X-Board-Room-Key",
+        "Access-Control-Allow-Headers": "Content-Type,X-Board-Room-Key,X-Board-Gate",
         "Access-Control-Allow-Methods": "OPTIONS,POST",
         "Vary": "Origin",
     }
