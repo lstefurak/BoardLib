@@ -254,6 +254,15 @@ function renderSessionOptions() {
   )).join("");
 }
 
+// Climb names, grades, and comments come from shared-board content authored by
+// other users, so escape them before they go into innerHTML.
+function escapeHtml(value) {
+  return String(value ?? "").replace(
+    /[&<>"']/g,
+    (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]),
+  );
+}
+
 function render() {
   const session = state.sessions[state.selectedIndex];
   $("sessionSelect").value = String(state.selectedIndex);
@@ -276,7 +285,7 @@ function render() {
       const count = session.grade_counts[grade];
       const width = Math.max(4, Math.round((count / maxCount) * 100));
       return `<div class="bar-row">
-        <div class="bar-label">${grade}</div>
+        <div class="bar-label">${escapeHtml(grade)}</div>
         <div class="bar-track"><div class="bar" style="width:${width}%"></div></div>
         <div class="bar-count">${count}</div>
       </div>`;
@@ -286,8 +295,8 @@ function render() {
   $("climbRows").innerHTML = currentSessionRows().map((row) => (
     `<tr>
       <td>${formatTime(row.date)}</td>
-      <td>${row.climb_name}${row.is_mirror ? " (mirror)" : ""}</td>
-      <td>${row.logged_grade}</td>
+      <td>${escapeHtml(row.climb_name)}${row.is_mirror ? " (mirror)" : ""}</td>
+      <td>${escapeHtml(row.logged_grade)}</td>
       <td>${row.angle}</td>
       <td>${row.tries}</td>
       <td>${row.is_ascent ? "send" : "attempt"}${row.is_benchmark ? ", benchmark" : ""}</td>
