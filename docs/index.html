@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <!-- Defense-in-depth: no inline/remote scripts; only the Lambda backend is a
-       valid fetch target. 'unsafe-inline' is needed for style only (inline bar
+  <!-- Defense-in-depth: no inline/remote scripts; AWS-hosted Function URL
+       endpoints are valid fetch targets across Lambda regions. 'unsafe-inline'
+       is needed for style only (inline bar
        widths), which cannot execute script. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://*.lambda-url.us-east-1.on.aws; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://*.on.aws; base-uri 'none'; form-action 'none'">
   <title>The Board Room</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -47,7 +48,7 @@
         <form class="source-grid" id="apiForm" data-panel="api">
           <label>
             Lambda Function URL
-            <input id="endpointInput" name="endpoint" type="url" placeholder="https://abc.lambda-url.us-east-1.on.aws/">
+            <input id="endpointInput" name="endpoint" type="url" placeholder="https://abc.lambda-url.region.on.aws/">
           </label>
           <label>
             Access key
