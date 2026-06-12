@@ -80,3 +80,21 @@ variable "log_retention_days" {
   type        = number
   default     = 14
 }
+
+variable "alarm_actions" {
+  description = "ARNs (e.g. an SNS topic) notified when a monitoring alarm fires. Empty list disables notifications but keeps the alarms visible in the console."
+  type        = list(string)
+  default     = []
+}
+
+variable "auth_failure_alarm_threshold" {
+  description = "403s per 5-minute period (sustained for 3 periods) that trigger the auth-failures alarm."
+  type        = number
+  default     = 10
+}
+
+variable "server_error_alarm_threshold" {
+  description = "502s per 5-minute period (sustained for 2 periods) that trigger the server-errors alarm."
+  type        = number
+  default     = 3
+}

@@ -68,10 +68,21 @@ def grade_key(grade: str) -> tuple[int, str]:
 def load_rows(csv_path: Path) -> list[dict[str, object]]:
     rows = []
     with csv_path.open(newline="", encoding="utf-8-sig") as input_file:
-        for row in csv.DictReader(input_file):
+        reader = csv.DictReader(input_file)
+        if reader.fieldnames is None or "date" not in reader.fieldnames:
+            raise SystemExit(
+                f"{csv_path}: no 'date' column found. Expected a BoardLib logbook "
+                "CSV with headers (was it exported with --no-headers?)."
+            )
+        for row in reader:
             if not any(row.values()):
                 continue
-            climbed_at = parse_date(row["date"])
+            try:
+                climbed_at = parse_date(row.get("date") or "")
+            except ValueError:
+                # A truncated or hand-edited row without a usable date can't be
+                # assigned to a session; skip it rather than aborting the report.
+                continue
             logged_grade = (row.get("logged_grade") or "").strip()
             displayed_grade = (row.get("displayed_grade") or "").strip()
             rows.append(
@@ -133,7 +144,11 @@ def summarize(rows: list[dict[str, object]]) -> dict[str, object]:
 
 
 def render_html(csv_path: Path, rows: list[dict[str, object]], summary: dict[str, object]) -> str:
-    payload = json.dumps({"rows": rows, "summary": summary}, separators=(",", ":"))
+    # "</" must be escaped or a "</script>" inside any CSV string (climb name,
+    # comment) terminates the inline script element and injects markup.
+    payload = json.dumps({"rows": rows, "summary": summary}, separators=(",", ":")).replace(
+        "</", "<\\/"
+    )
     title = f"BoardLib Logbook Visualizer - {html.escape(csv_path.name)}"
     return f"""<!doctype html>
 <html lang="en">
@@ -443,6 +458,15 @@ def render_html(csv_path: Path, rows: list[dict[str, object]], summary: dict[str
 
     const $ = (id) => document.getElementById(id);
 
+    function esc(value) {{
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }}
+
     function formatDate(value) {{
       const date = new Date(value + "T00:00:00");
       return date.toLocaleDateString(undefined, {{ weekday: "short", year: "numeric", month: "short", day: "numeric" }});
@@ -504,7 +528,7 @@ def render_html(csv_path: Path, rows: list[dict[str, object]], summary: dict[str
           const width = Math.max(4, Math.round((count / maxCount) * 100));
           return `
             <div class="bar-row">
-              <div class="bar-label">${{grade}}</div>
+              <div class="bar-label">${{esc(grade)}}</div>
               <div class="bar-track"><div class="bar" style="width: ${{width}}%"></div></div>
               <div class="bar-count">${{count}}</div>
             </div>`;
@@ -516,10 +540,10 @@ def render_html(csv_path: Path, rows: list[dict[str, object]], summary: dict[str
       $("climbRows").innerHTML = sessionRows(session).map((row) => `
         <tr>
           <td>${{timeOf(row.date)}}</td>
-          <td>${{row.climb_name}}${{row.is_mirror ? " (mirror)" : ""}}</td>
-          <td>${{row.logged_grade}}</td>
-          <td>${{row.angle}}</td>
-          <td>${{row.tries}}</td>
+          <td>${{esc(row.climb_name)}}${{row.is_mirror ? " (mirror)" : ""}}</td>
+          <td>${{esc(row.logged_grade)}}</td>
+          <td>${{esc(row.angle)}}</td>
+          <td>${{esc(row.tries)}}</td>
           <td>${{row.is_ascent ? "send" : "attempt"}}${{row.is_benchmark ? ", benchmark" : ""}}</td>
         </tr>
       `).join("");
@@ -531,13 +555,20 @@ def render_html(csv_path: Path, rows: list[dict[str, object]], summary: dict[str
           <td>${{formatDate(session.date)}}</td>
           <td>${{session.ascents}}</td>
           <td>${{session.total_tries}}</td>
-          <td><div class="pill-list">${{Object.entries(session.grade_counts).map(([grade, count]) => `<span class="pill">${{grade}} x${{count}}</span>`).join("")}}</div></td>
+          <td><div class="pill-list">${{Object.entries(session.grade_counts).map(([grade, count]) => `<span class="pill">${{esc(grade)}} x${{count}}</span>`).join("")}}</div></td>
         </tr>
       `).join("");
     }}
 
     function render() {{
       const session = sessions[selectedIndex];
+      if (!session) {{
+        $("stats").innerHTML = "<p class='subhead'>No sessions found in this CSV.</p>";
+        $("gradeChart").innerHTML = "";
+        $("climbRows").innerHTML = "";
+        $("workoutLog").textContent = "";
+        return;
+      }}
       $("sessionSelect").value = String(selectedIndex);
       renderStats(session);
       renderChart(session);

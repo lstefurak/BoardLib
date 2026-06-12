@@ -14,6 +14,7 @@ class TestBoardLogLambda(unittest.TestCase):
             "BOARDLOG_ACCESS_KEY_PARAM",
             "BOARDLOG_GATE_PHRASE_PARAM",
             "BOARDLOG_ALLOWED_BOARDS",
+            "AWS_LAMBDA_FUNCTION_NAME",
         ):
             os.environ.pop(name, None)
         handler._secret_cache.clear()
@@ -106,6 +107,51 @@ class TestBoardLogLambda(unittest.TestCase):
             None,
         )
         self.assertEqual(response["statusCode"], 200)
+
+    def test_fails_closed_in_lambda_when_secret_unconfigured(self):
+        # In Lambda (public Function URL) a missing secret must refuse requests
+        # rather than silently disabling auth.
+        os.environ["AWS_LAMBDA_FUNCTION_NAME"] = "boardlog"
+        response = handler.lambda_handler(
+            self.event({"board": "tension", "username": "u", "password": "p"}),
+            None,
+        )
+        self.assertEqual(response["statusCode"], 403)
+
+    def test_decodes_base64_body(self):
+        import base64
+
+        os.environ["BOARDLOG_ACCESS_KEY"] = "secret"
+        raw = json.dumps({"action": "unlock"})
+        event = {
+            "requestContext": {"http": {"method": "POST"}},
+            "headers": {},
+            "body": base64.b64encode(raw.encode("utf-8")).decode("ascii"),
+            "isBase64Encoded": True,
+        }
+        response = handler.lambda_handler(event, None)
+        # Gate unconfigured locally -> unlock succeeds; the point is the body parsed.
+        self.assertEqual(response["statusCode"], 200)
+
+    @unittest.mock.patch("backend.boardlog_lambda.handler.export_logbook")
+    def test_bad_board_credentials_return_401(self, mock_export):
+        mock_export.side_effect = handler.BoardLoginError("Board login failed; check your username and password")
+        response = handler.lambda_handler(
+            self.event({"board": "tension", "username": "u", "password": "wrong"}),
+            None,
+        )
+        self.assertEqual(response["statusCode"], 401)
+        self.assertIn("login failed", json.loads(response["body"])["error"].lower())
+
+    @unittest.mock.patch("backend.boardlog_lambda.handler.export_logbook")
+    def test_internal_errors_are_not_leaked(self, mock_export):
+        mock_export.side_effect = ValueError("internal detail: /etc/secret/path")
+        response = handler.lambda_handler(
+            self.event({"board": "tension", "username": "u", "password": "p"}),
+            None,
+        )
+        self.assertEqual(response["statusCode"], 502)
+        self.assertNotIn("internal detail", response["body"])
 
     def test_secrets_are_independent(self):
         # Only the gate is configured; the access key check is disabled and must

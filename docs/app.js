@@ -20,7 +20,9 @@ function currentEndpoint() {
 }
 
 // The Function URL is public; the gate phrase and access key are sent as
-// headers and verified server-side by the Lambda. The page stores no secrets.
+// headers and verified server-side by the Lambda. The page keeps both secrets
+// in sessionStorage for the lifetime of the tab (cleared by Lock) so a
+// refresh doesn't force re-entry; nothing is persisted beyond the tab.
 async function callBackend(endpoint, bodyObj, extraHeaders = {}) {
   return fetch(endpoint, {
     method: "POST",
@@ -53,6 +55,9 @@ function lock() {
   $("app").classList.add("is-hidden");
   $("gate").classList.remove("is-hidden");
   $("knockInput").value = "";
+  // Clear the secrets from the DOM too, or they stay one "Show" click away.
+  $("accessKeyInput").value = "";
+  $("passwordInput").value = "";
 }
 
 function parseCsv(text) {
@@ -83,6 +88,9 @@ function parseCsv(text) {
   }
   row.push(field);
   if (row.some((value) => value.trim())) rows.push(row);
+  if (!rows.length) {
+    throw new Error("That CSV file is empty.");
+  }
   const headers = rows.shift().map((header) => header.trim());
   return rows.map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] || ""])));
 }
@@ -101,8 +109,10 @@ function cleanText(value) {
   return text.toLowerCase() === "nan" ? "" : text;
 }
 
-function normalizeRows(csvRows) {
-  return csvRows.map((row) => {
+// Normalizes rows from either source: CSV rows carry string flags ("true"),
+// API JSON rows carry real booleans — parseBool handles both.
+function normalizeRows(rawRows) {
+  return rawRows.map((row) => {
     const date = new Date(cleanText(row.date).replace(" ", "T"));
     if (Number.isNaN(date.getTime())) return null;
     const loggedGrade = cleanText(row.logged_grade) || cleanText(row.displayed_grade) || "Ungraded";
@@ -119,29 +129,6 @@ function normalizeRows(csvRows) {
       is_mirror: parseBool(row.is_mirror),
       is_repeat: parseBool(row.is_repeat),
       is_ascent: parseBool(row.is_ascent),
-      comment: cleanText(row.comment),
-    };
-  }).filter((row) => row && row.climb_name);
-}
-
-function normalizeJsonRows(jsonRows) {
-  return jsonRows.map((row) => {
-    const date = new Date(cleanText(row.date).replace(" ", "T"));
-    if (Number.isNaN(date.getTime())) return null;
-    const loggedGrade = cleanText(row.logged_grade) || cleanText(row.displayed_grade) || "Ungraded";
-    return {
-      board: cleanText(row.board),
-      angle: parseIntSafe(row.angle),
-      climb_name: cleanText(row.climb_name),
-      date: date.toISOString(),
-      session_date: date.toISOString().slice(0, 10),
-      logged_grade: loggedGrade,
-      displayed_grade: cleanText(row.displayed_grade),
-      is_benchmark: Boolean(row.is_benchmark),
-      tries: parseIntSafe(row.tries, 1),
-      is_mirror: Boolean(row.is_mirror),
-      is_repeat: Boolean(row.is_repeat),
-      is_ascent: Boolean(row.is_ascent),
       comment: cleanText(row.comment),
     };
   }).filter((row) => row && row.climb_name);
@@ -185,8 +172,7 @@ function summarize(rows) {
 }
 
 function loadCsvText(text, sourceLabel) {
-  state.rows = normalizeRows(parseCsv(text));
-  loadRows(sourceLabel);
+  loadRows(normalizeRows(parseCsv(text)), sourceLabel);
 }
 
 function loadJsonPayload(payload, sourceLabel) {
@@ -194,18 +180,20 @@ function loadJsonPayload(payload, sourceLabel) {
   if (!Array.isArray(rows)) {
     throw new Error("Export response did not include a rows array.");
   }
-  state.rows = normalizeJsonRows(rows);
-  loadRows(sourceLabel);
+  loadRows(normalizeRows(rows), sourceLabel);
 }
 
-function loadRows(sourceLabel) {
-  const summary = summarize(state.rows);
-  state.sessions = summary.sessions;
-  state.gradeOrder = summary.gradeOrder;
-  state.selectedIndex = Math.max(0, state.sessions.length - 1);
-  if (!state.sessions.length) {
+function loadRows(rows, sourceLabel) {
+  // Validate before touching state, so a failed load leaves the previously
+  // rendered dashboard fully working instead of pointing at empty sessions.
+  const summary = summarize(rows);
+  if (!summary.sessions.length) {
     throw new Error("No sessions found in that CSV.");
   }
+  state.rows = rows;
+  state.sessions = summary.sessions;
+  state.gradeOrder = summary.gradeOrder;
+  state.selectedIndex = state.sessions.length - 1;
   $("dashboard").classList.remove("is-hidden");
   setStatus(`Loaded ${state.rows.length} rows from ${sourceLabel}.`, "good");
   renderSessionOptions();
@@ -326,15 +314,22 @@ document.querySelectorAll(".tab").forEach((tab) => {
   });
 });
 
+let exportInFlight = false;
+
 $("apiForm").addEventListener("submit", async (event) => {
   event.preventDefault();
+  // One export at a time: concurrent requests race and the stale response
+  // would overwrite the newer dashboard.
+  if (exportInFlight) return;
   const endpoint = currentEndpoint();
   if (!endpoint) {
     setStatus("Add a private export endpoint first.", "error");
     return;
   }
   const accessKey = $("accessKeyInput").value.trim();
-  sessionStorage.setItem("boardlog:key", accessKey);
+  const submitButton = $("apiForm").querySelector('button[type="submit"]');
+  exportInFlight = true;
+  if (submitButton) submitButton.disabled = true;
   setStatus("Requesting export...");
   try {
     const response = await callBackend(
@@ -349,13 +344,20 @@ $("apiForm").addEventListener("submit", async (event) => {
     if (response.status === 403) {
       throw new Error("Backend rejected the gate phrase or access key (403).");
     }
+    if (response.status === 401) {
+      throw new Error("Board login failed; check your username and password.");
+    }
     if (!response.ok) throw new Error(`Export failed with HTTP ${response.status}`);
+    // Only remember the key once the backend has accepted it.
+    sessionStorage.setItem("boardlog:key", accessKey);
     const payload = await response.json();
     loadJsonPayload(payload, "private export endpoint");
   } catch (error) {
     setStatus(error.message, "error");
   } finally {
     $("passwordInput").value = "";
+    exportInFlight = false;
+    if (submitButton) submitButton.disabled = false;
   }
 });
 

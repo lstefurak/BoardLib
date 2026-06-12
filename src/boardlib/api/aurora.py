@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import datetime
 import os
 import uuid
@@ -63,18 +65,18 @@ def explore(board, token):
     return response.json()
 
 
-def get_ascents(board, token):
+def get_ascents(board, token, session=None):
     return [
         ascent
-        for sync_data in sync(board, {"ascents": BASE_SYNC_DATE}, token)
+        for sync_data in sync(board, {"ascents": BASE_SYNC_DATE}, token, session=session)
         for ascent in sync_data.get("ascents", [])
     ]
 
 
-def get_attempts(board, token):
+def get_attempts(board, token, session=None):
     return [
         bid
-        for sync_data in sync(board, {"bids": BASE_SYNC_DATE}, token)
+        for sync_data in sync(board, {"bids": BASE_SYNC_DATE}, token, session=session)
         for bid in sync_data.get("bids", [])
     ]
 
@@ -127,17 +129,29 @@ def get_climb_name(board, climb_uuid):
     return heading.get_text(strip=True) if heading else None
 
 
+def _sync_payload(tables_and_sync_dates):
+    # Build URL-encoded form data manually - Aurora expects this format!
+    return "&".join(
+        f"{requests.utils.quote(table)}={requests.utils.quote(sync_date)}"
+        for table, sync_date in tables_and_sync_dates.items()
+    )
+
+
 def user_sync(board, table_name, token):
     response = requests.post(
         f"{WEB_HOSTS[board]}/sync",
-        data={table_name: BASE_SYNC_DATE},
-        headers={"Cookie": f"token={token}"},
+        data=_sync_payload({table_name: BASE_SYNC_DATE}),
+        headers={
+            "Cookie": f"token={token}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
     )
     response.raise_for_status()
     return response.json()
 
 
-def sync(board, tables_and_sync_dates, token=None, max_pages=DEFAULT_MAX_SYNC_PAGES):
+def sync(board, tables_and_sync_dates, token=None, max_pages=DEFAULT_MAX_SYNC_PAGES, session=None):
+    session = session or requests
     headers = {
         "Accept": "application/json",
         "User-Agent": "Kilter%20Board/202 CFNetwork/1568.100.1 Darwin/24.0.0",
@@ -151,15 +165,9 @@ def sync(board, tables_and_sync_dates, token=None, max_pages=DEFAULT_MAX_SYNC_PA
     complete = False
 
     while not complete and page_count < max_pages:
-        # Build URL-encoded form data manually - Aurora expects this format!
-        payload = "&".join(
-            f"{requests.utils.quote(table)}={requests.utils.quote(sync_date)}"
-            for table, sync_date in payload_dict.items()
-        )
-
-        response = requests.post(
+        response = session.post(
             f"{WEB_HOSTS[board]}/sync",
-            data=payload,
+            data=_sync_payload(payload_dict),
             headers=headers,
         )
         response.raise_for_status()
@@ -167,25 +175,44 @@ def sync(board, tables_and_sync_dates, token=None, max_pages=DEFAULT_MAX_SYNC_PA
         complete = response_json.pop("_complete", False)
         yield response_json
 
-        # Update payload with last sync date
-        if token:
-            for user_sync in response_json.get("user_syncs", []):
-                table_name = user_sync.get("table_name")
-                last_synchronized_at = user_sync.get("last_synchronized_at")
-                if table_name not in payload_dict or not last_synchronized_at:
-                    continue
-
-                payload_dict[table_name] = last_synchronized_at
-
-        for shared_sync in response_json.get("shared_syncs", []):
-            table_name = shared_sync.get("table_name")
-            last_synchronized_at = shared_sync.get("last_synchronized_at")
-            if table_name not in payload_dict or not last_synchronized_at:
-                continue
-
-            payload_dict[table_name] = last_synchronized_at
+        # Update payload with the last sync date for each table.
+        sync_kinds = ("user_syncs", "shared_syncs") if token else ("shared_syncs",)
+        for sync_kind in sync_kinds:
+            for table_sync in response_json.get(sync_kind, []):
+                table_name = table_sync.get("table_name")
+                last_synchronized_at = table_sync.get("last_synchronized_at")
+                if table_name in payload_dict and last_synchronized_at:
+                    payload_dict[table_name] = last_synchronized_at
 
         page_count += 1
+
+
+def sync_local_database(board, db_path, token, max_pages=DEFAULT_MAX_SYNC_PAGES, progress=None):
+    """Pull shared-table updates from the board API into a local database copy.
+
+    :param progress: Optional callback called as
+        progress(table_name, page_row_count, cumulative_row_count) after each
+        synced page.
+    :return: A dictionary mapping table names to total rows synced.
+    """
+    tables_and_sync_dates = boardlib.db.aurora.get_shared_syncs(db_path)
+    row_counts_totals = {}
+    with requests.Session() as session:
+        for sync_result in sync(
+            board,
+            tables_and_sync_dates,
+            token=token,
+            max_pages=max_pages,
+            session=session,
+        ):
+            row_counts = boardlib.db.aurora.sync_shared_tables(db_path, sync_result)
+            for table_name, row_count in row_counts.items():
+                row_counts_totals[table_name] = (
+                    row_counts_totals.get(table_name, 0) + row_count
+                )
+                if progress:
+                    progress(table_name, row_count, row_counts_totals[table_name])
+    return row_counts_totals
 
 
 def gym_boards(board):
@@ -209,24 +236,23 @@ def download_images(board, database_path, output_directory, composite=False):
     os.makedirs(output_directory, exist_ok=True)
     image_filenames = boardlib.db.aurora.get_image_filenames(database_path)
     api_host = f"https://api.{HOST_BASES[board]}.com"
-    
-    for image_filename in image_filenames:
-        # Create subdirectories if needed (e.g., for product_sizes_layouts_sets/1-v4.png)
-        output_path = os.path.join(output_directory, image_filename)
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        
-        # Skip download if file already exists
-        if os.path.exists(output_path):
-            print(f"Skipping {image_filename} (already exists)")
-            continue
-        
-        response = requests.get(
-            f"{api_host}/img/{image_filename}",
-        )
-        response.raise_for_status()
-        
-        with open(output_path, "wb") as output_file:
-            output_file.write(response.content)
+
+    with requests.Session() as session:
+        for image_filename in image_filenames:
+            # Create subdirectories if needed (e.g., for product_sizes_layouts_sets/1-v4.png)
+            output_path = os.path.join(output_directory, image_filename)
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+            # Skip download if file already exists
+            if os.path.exists(output_path):
+                print(f"Skipping {image_filename} (already exists)")
+                continue
+
+            response = session.get(f"{api_host}/img/{image_filename}")
+            response.raise_for_status()
+
+            with open(output_path, "wb") as output_file:
+                output_file.write(response.content)
 
     if (composite):
         # Imported lazily so callers that only need logbook/database features
@@ -339,7 +365,7 @@ def save_climb(
         "frames_pace": frames_pace,
         "frames": frames,
     }
-    if angle:
+    if angle is not None:
         data["angle"] = angle
 
     response = requests.put(
@@ -351,11 +377,14 @@ def save_climb(
     return response.json()
 
 
-def bids_logbook_entries(board, token, db_path):
-    raw_entries = get_attempts(board, token)
+def bids_logbook_entries(board, token, db_path, session=None):
+    raw_entries = get_attempts(board, token, session=session)
+    climb_names = boardlib.db.aurora.get_climb_name_mapping(
+        db_path, [raw_entry["climb_uuid"] for raw_entry in raw_entries]
+    )
 
     for raw_entry in raw_entries:
-        climb_name = boardlib.db.aurora.get_climb_name(db_path, raw_entry["climb_uuid"])
+        climb_name = climb_names.get(raw_entry["climb_uuid"])
 
         yield {
             "climb_uuid": raw_entry["climb_uuid"],
@@ -373,13 +402,17 @@ def bids_logbook_entries(board, token, db_path):
 def process_raw_ascent_entries(raw_ascents_entries, board, db_path):
     ascents_entries = []
     difficulty_mapping = boardlib.db.aurora.get_difficulty_mapping(db_path)
-    for raw_entry in raw_ascents_entries:
-        if not raw_entry["is_listed"]:
-            continue
-
-        climb_name = boardlib.db.aurora.get_climb_name(db_path, raw_entry["climb_uuid"])
-        difficulty, benchmark_difficulty = boardlib.db.aurora.get_difficulty(
-            db_path, raw_entry["climb_uuid"], raw_entry["angle"]
+    listed_entries = [entry for entry in raw_ascents_entries if entry["is_listed"]]
+    climb_names = boardlib.db.aurora.get_climb_name_mapping(
+        db_path, [entry["climb_uuid"] for entry in listed_entries]
+    )
+    difficulty_stats = boardlib.db.aurora.get_difficulty_stats_mapping(
+        db_path, [entry["climb_uuid"] for entry in listed_entries]
+    )
+    for raw_entry in listed_entries:
+        climb_name = climb_names.get(raw_entry["climb_uuid"])
+        difficulty, benchmark_difficulty = difficulty_stats.get(
+            (raw_entry["climb_uuid"], raw_entry["angle"]), (None, None)
         )
 
         ascents_entries.append(
@@ -432,72 +465,54 @@ def summarize_bids(bids_df, board):
 def combine_ascents_and_bids(ascents_df, bids_summary, db_path):
     final_logbook = []
     difficulty_mapping = boardlib.db.aurora.get_difficulty_mapping(db_path)
+
+    # summarize_bids groups by exactly this key, so each key maps to one row.
+    # Bids matched to an ascent are removed; the leftovers become attempt rows.
+    leftover_bids = {
+        (bid_row["climb_uuid"], bid_row["date"], bid_row["is_mirror"], bid_row["angle"]): bid_row
+        for _, bid_row in bids_summary.iterrows()
+    }
+
     for _, ascent_row in ascents_df.iterrows():
-        ascent_date = ascent_row["date"].date()
-        ascent_climb_uuid = ascent_row["climb_uuid"]
-        ascent_is_mirror = ascent_row["is_mirror"]
-        ascent_angle = ascent_row["angle"]
+        key = (
+            ascent_row["climb_uuid"],
+            ascent_row["date"].date(),
+            ascent_row["is_mirror"],
+            ascent_row["angle"],
+        )
+        bid_row = leftover_bids.pop(key, None)
+        tries = ascent_row["tries"] + (bid_row["tries"] if bid_row is not None else 0)
 
-        bid_match = bids_summary[
-            (bids_summary["climb_uuid"] == ascent_climb_uuid)
-            & (bids_summary["date"] == ascent_date)
-            & (bids_summary["is_mirror"] == ascent_is_mirror)
-            & (bids_summary["angle"] == ascent_angle)
-        ]
+        final_logbook.append(
+            {
+                # Used for Climbdex to uniquely identify climbs at a particular angle
+                "climb_angle_uuid": f"{ascent_row['climb_uuid']}-{ascent_row['angle']}",
+                "climb_uuid": ascent_row["climb_uuid"],
+                "board": ascent_row["board"],
+                "angle": ascent_row["angle"],
+                "climb_name": ascent_row["name"],
+                "date": ascent_row["date"],
+                "logged_grade": ascent_row["logged_grade"],
+                "displayed_grade": ascent_row.get("displayed_grade", None),
+                "is_benchmark": ascent_row.get("is_benchmark", None),
+                "tries": tries,
+                "is_mirror": ascent_row["is_mirror"],
+                "is_ascent": True,
+                "comment": ascent_row["comment"],
+            }
+        )
 
-        # Used for Climbdex to uniquely identify climbs at a particular angle
-        climb_angle_uuid = f"{ascent_climb_uuid}-{ascent_angle}"
-
-        if not bid_match.empty:
-            bid_row = bid_match.iloc[0]
-            total_tries = ascent_row["tries"] + bid_row["tries"]
-            final_logbook.append(
-                {
-                    "climb_angle_uuid": climb_angle_uuid,
-                    "climb_uuid": ascent_climb_uuid,
-                    "board": ascent_row["board"],
-                    "angle": ascent_row["angle"],
-                    "climb_name": ascent_row["name"],
-                    "date": ascent_row["date"],
-                    "logged_grade": ascent_row["logged_grade"],
-                    "displayed_grade": ascent_row.get("displayed_grade", None),
-                    "is_benchmark": ascent_row.get("is_benchmark", None),
-                    "tries": total_tries,
-                    "is_mirror": ascent_row["is_mirror"],
-                    "is_ascent": True,
-                    "comment": ascent_row["comment"],
-                }
-            )
-            bids_summary = bids_summary.drop(bid_match.index)
-        else:
-            final_logbook.append(
-                {
-                    "climb_angle_uuid": climb_angle_uuid,
-                    "climb_uuid": ascent_climb_uuid,
-                    "board": ascent_row["board"],
-                    "angle": ascent_row["angle"],
-                    "climb_name": ascent_row["name"],
-                    "date": ascent_row["date"],
-                    "logged_grade": ascent_row["logged_grade"],
-                    "displayed_grade": ascent_row.get("displayed_grade", None),
-                    "is_benchmark": ascent_row["is_benchmark"],
-                    "tries": ascent_row["tries"],
-                    "is_mirror": ascent_row["is_mirror"],
-                    "is_ascent": True,
-                    "comment": ascent_row["comment"],
-                }
-            )
-
-    for _, bid_row in bids_summary.iterrows():
-        climb_angle_uuid = f"{bid_row['climb_uuid']}-{bid_row['angle']}"
-
-        difficulty, benchmark_dificulty = boardlib.db.aurora.get_difficulty(
-            db_path, bid_row["climb_uuid"], bid_row["angle"]
+    difficulty_stats = boardlib.db.aurora.get_difficulty_stats_mapping(
+        db_path, [bid_row["climb_uuid"] for bid_row in leftover_bids.values()]
+    )
+    for bid_row in leftover_bids.values():
+        difficulty, benchmark_difficulty = difficulty_stats.get(
+            (bid_row["climb_uuid"], bid_row["angle"]), (None, None)
         )
 
         final_logbook.append(
             {
-                "climb_angle_uuid": climb_angle_uuid,
+                "climb_angle_uuid": f"{bid_row['climb_uuid']}-{bid_row['angle']}",
                 "climb_uuid": bid_row["climb_uuid"],
                 "board": bid_row["board"],
                 "angle": bid_row["angle"],
@@ -505,7 +520,7 @@ def combine_ascents_and_bids(ascents_df, bids_summary, db_path):
                 "date": bid_row["date"],
                 "logged_grade": None,
                 "displayed_grade": difficulty_to_grade(difficulty_mapping, difficulty),
-                "is_benchmark": bool(benchmark_dificulty),
+                "is_benchmark": bool(benchmark_difficulty),
                 "tries": bid_row["tries"],
                 "is_mirror": bid_row["is_mirror"],
                 "is_ascent": False,
@@ -517,24 +532,10 @@ def combine_ascents_and_bids(ascents_df, bids_summary, db_path):
     return final_logbook
 
 
-def calculate_sessions_count(group):
-    group = group.sort_values(by="date")
-    unique_dates = group["date"].dt.date.drop_duplicates().reset_index(drop=True)
-    sessions_count = unique_dates.rank(method="dense").astype(int)
-    sessions_count_map = dict(zip(unique_dates, sessions_count))
-    group["sessions_count"] = group["date"].dt.date.map(sessions_count_map)
-    return group
-
-
-def calculate_tries_total(group):
-    group = group.sort_values(by="date")
-    group["tries_total"] = group["tries"].cumsum()
-    return group
-
-
 def logbook_entries(board, token, db_path):
-    bids_entries = list(bids_logbook_entries(board, token, db_path))
-    raw_ascents_entries = get_ascents(board, token)
+    with requests.Session() as session:
+        bids_entries = list(bids_logbook_entries(board, token, db_path, session=session))
+        raw_ascents_entries = get_ascents(board, token, session=session)
 
     if not bids_entries and not raw_ascents_entries:
         return pd.DataFrame(
