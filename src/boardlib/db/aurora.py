@@ -1,9 +1,28 @@
 import collections
+import contextlib
 import io
 import sqlite3
 import zipfile
 
 import requests
+
+
+# sqlite3's connection context manager only manages transactions; it does not
+# close the connection. This wrapper does both, so callers never leak handles
+# (which also keep the database file locked on Windows).
+@contextlib.contextmanager
+def _connection(database):
+    connection = sqlite3.connect(database)
+    try:
+        with connection:
+            yield connection
+    finally:
+        connection.close()
+
+
+def _chunks(items, size=500):
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
 
 
 APP_PACKAGE_NAMES = {
@@ -57,7 +76,7 @@ def get_shared_syncs(database):
     :param database: The path to the SQLite database file.
     :return: A dictionary mapping table names to their last synchronized date.
     """
-    with sqlite3.connect(database) as connection:
+    with _connection(database) as connection:
         result = connection.execute(
             "SELECT table_name, last_synchronized_at FROM shared_syncs"
         )
@@ -74,7 +93,7 @@ def sync_shared_tables(database, sync_result):
     :param database: The path to the SQLite database file.
     :param row_counts: A dictionary mapping table names to number of rows inserted/updated/deleted.
     """
-    with sqlite3.connect(database) as connection:
+    with _connection(database) as connection:
         row_counts = {}
         for table_name, rows in sync_result.items():
             ROW_INSERTERS.get(table_name, insert_rows_default)(
@@ -117,11 +136,14 @@ def insert_rows_climb_stats(connection, table_name, rows):
             row,
             display_difficulty=(
                 row["benchmark_difficulty"]
-                if row.get("benchmark_difficulty")
-                else row["difficulty_average"]
+                if row.get("benchmark_difficulty") is not None
+                else row.get("difficulty_average")
             ),
         )
-        row_list = insert_rows if row_dict["display_difficulty"] else delete_rows
+        # Only a missing difficulty marks a deletion; 0 is a valid difficulty.
+        row_list = (
+            insert_rows if row_dict["display_difficulty"] is not None else delete_rows
+        )
         row_list.append(row_dict)
 
     connection.executemany(
@@ -141,7 +163,7 @@ ROW_INSERTERS = {
 
 
 def get_difficulty(database, climb_uuid, angle):
-    with sqlite3.connect(database) as connection:
+    with _connection(database) as connection:
         results = connection.execute(
             "SELECT display_difficulty, benchmark_difficulty FROM climb_stats WHERE climb_uuid = ? AND angle = ?",
             (climb_uuid, angle),
@@ -150,7 +172,7 @@ def get_difficulty(database, climb_uuid, angle):
 
 
 def get_difficulty_mapping(database):
-    with sqlite3.connect(database) as connection:
+    with _connection(database) as connection:
         return {
             row[0]: row[1]
             for row in connection.execute(
@@ -160,20 +182,60 @@ def get_difficulty_mapping(database):
 
 
 def get_climb_name(database, climb_uuid):
-    with sqlite3.connect(database) as connection:
+    with _connection(database) as connection:
         results = connection.execute(
             "SELECT name FROM climbs WHERE uuid = ?", (climb_uuid,)
         )
         return next(results, [None])[0]
 
 
+def get_climb_name_mapping(database, climb_uuids):
+    """
+    Batch variant of get_climb_name: one connection and a few chunked queries
+    instead of a connection per climb.
+
+    :return: A dictionary mapping climb uuid to climb name.
+    """
+    unique_uuids = list(set(climb_uuids))
+    mapping = {}
+    with _connection(database) as connection:
+        for chunk in _chunks(unique_uuids):
+            placeholders = ", ".join("?" * len(chunk))
+            for climb_uuid, name in connection.execute(
+                f"SELECT uuid, name FROM climbs WHERE uuid IN ({placeholders})", chunk
+            ):
+                mapping[climb_uuid] = name
+    return mapping
+
+
+def get_difficulty_stats_mapping(database, climb_uuids):
+    """
+    Batch variant of get_difficulty.
+
+    :return: A dictionary mapping (climb_uuid, angle) to
+        (display_difficulty, benchmark_difficulty).
+    """
+    unique_uuids = list(set(climb_uuids))
+    mapping = {}
+    with _connection(database) as connection:
+        for chunk in _chunks(unique_uuids):
+            placeholders = ", ".join("?" * len(chunk))
+            for climb_uuid, angle, display, benchmark in connection.execute(
+                f"SELECT climb_uuid, angle, display_difficulty, benchmark_difficulty "
+                f"FROM climb_stats WHERE climb_uuid IN ({placeholders})",
+                chunk,
+            ):
+                mapping[(climb_uuid, angle)] = (display, benchmark)
+    return mapping
+
+
 def get_image_filenames(database):
-    with sqlite3.connect(database) as connection:
+    with _connection(database) as connection:
         results = connection.execute("SELECT image_filename FROM product_sizes_layouts_sets WHERE image_filename IS NOT NULL")
         return [row[0] for row in results]
 
 def get_layouts_images_dict(database):
-    with sqlite3.connect(database) as connection:
+    with _connection(database) as connection:
         results = connection.execute(
             """
             SELECT
@@ -181,10 +243,11 @@ def get_layouts_images_dict(database):
                 s.name product_size_name,
                 p.image_filename
             FROM product_sizes_layouts_sets p
-            INNER JOIN 
+            INNER JOIN
                 (SELECT id, name FROM layouts) AS l ON p.layout_id = l.id
             INNER JOIN
-                (SELECT id, name FROM product_sizes) AS s ON p.product_size_id = s.id;
+                (SELECT id, name FROM product_sizes) AS s ON p.product_size_id = s.id
+            WHERE p.image_filename IS NOT NULL;
             """
         )
 

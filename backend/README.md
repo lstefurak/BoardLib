@@ -58,7 +58,7 @@ Body:
 
 - `BOARDLOG_ACCESS_KEY_PARAM`: SSM SecureString parameter name holding the access key (production). Read at runtime and decrypted.
 - `BOARDLOG_GATE_PHRASE_PARAM`: SSM SecureString parameter name holding the gate phrase (production).
-- `BOARDLOG_ACCESS_KEY` / `BOARDLOG_GATE_PHRASE`: Plaintext fallbacks for local/dev/tests. Take precedence over the SSM parameters when set. Each check is disabled if neither the env var nor the parameter is configured.
+- `BOARDLOG_ACCESS_KEY` / `BOARDLOG_GATE_PHRASE`: Plaintext fallbacks for local/dev/tests. Take precedence over the SSM parameters when set. Locally, a check is disabled if neither the env var nor the parameter is configured. **In Lambda the same situation fails closed** (every request is refused with 403 and a warning is logged) so a misconfigured deployment can never silently run without authentication.
 - `BOARDLOG_CACHE_DIR`: Optional database cache directory. Defaults to `/tmp/boardlog`.
 - `BOARDLOG_MAX_SYNC_PAGES`: Optional shared database sync page cap. Defaults to `100`.
 - `BOARDLOG_ALLOWED_BOARDS`: Optional comma-separated board names. Defaults to `tension`.

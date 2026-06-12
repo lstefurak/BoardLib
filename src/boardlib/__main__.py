@@ -29,14 +29,19 @@ LOGBOOK_FIELDS = (
 
 
 def logbook_entries(board, username, password, database=None):
-    api = (
-        boardlib.api.moon
-        if board.startswith("moon")
-        else boardlib.api.aurora if board in boardlib.api.aurora.HOST_BASES else None
-    )
-    if api:
-        yield from api.logbook_entries(board, username, password, database)
-
+    """Yield logbook entries as dicts for any supported board."""
+    if board.startswith("moon"):
+        yield from boardlib.api.moon.logbook_entries(board, username, password)
+    elif board in boardlib.api.aurora.HOST_BASES:
+        if database is None:
+            raise ValueError(
+                f"A local database path is required for {board} logbooks. "
+                "Run the 'database' command first to download one."
+            )
+        token = boardlib.api.aurora.login(board, username, password)["token"]
+        yield from boardlib.api.aurora.logbook_entries(board, token, database).to_dict(
+            orient="records"
+        )
     else:
         raise ValueError(f"Unknown board {board}")
 
@@ -80,24 +85,15 @@ def handle_database_command(args):
         return
     
     print(f"Synchronizing database at {args.database_path}")
-    tables_and_sync_dates = boardlib.db.aurora.get_shared_syncs(args.database_path)
-    row_counts_totals = {}
-    for sync_result in boardlib.api.aurora.sync(
+    boardlib.api.aurora.sync_local_database(
         args.board,
-        tables_and_sync_dates,
-        token=get_aurora_login_token(args.board, args.username),
+        args.database_path,
+        get_aurora_login_token(args.board, args.username),
         max_pages=args.max_sync_pages,
-    ):
-        row_counts = boardlib.db.aurora.sync_shared_tables(
-            args.database_path, sync_result
-        )
-        for table_name, row_count in row_counts.items():
-            row_counts_totals[table_name] = (
-                row_counts_totals.get(table_name, 0) + row_count
-            )
-            print(
-                f"Synchronized page of {table_name}. Page size: {row_count}. Cumulative: {row_counts_totals[table_name]}"
-            )
+        progress=lambda table_name, row_count, total: print(
+            f"Synchronized page of {table_name}. Page size: {row_count}. Cumulative: {total}"
+        ),
+    )
 
 
 def handle_logbook_command(args):
@@ -114,7 +110,9 @@ def handle_logbook_command(args):
         entries = boardlib.api.aurora.logbook_entries(args.board, token, args.database_path).to_dict(orient="records")
 
     if args.output:
-        with open(args.output, "w", encoding="utf-8") as output_file:
+        # newline="" is required by the csv module; without it Windows writes
+        # \r\r\n and every record is followed by a blank line.
+        with open(args.output, "w", encoding="utf-8", newline="") as output_file:
             write_entries(
                 output_file,
                 entries,
@@ -153,26 +151,16 @@ def handle_download_all_command(args):
         if args.username:
             print(f"[{board}] Synchronizing database at {db_path}")
             try:
-                token = get_aurora_login_token(board, args.username)
-                tables_and_sync_dates = boardlib.db.aurora.get_shared_syncs(db_path)
-                row_counts_totals = {}
-                for sync_result in boardlib.api.aurora.sync(
+                boardlib.api.aurora.sync_local_database(
                     board,
-                    tables_and_sync_dates,
-                    token=token,
+                    db_path,
+                    get_aurora_login_token(board, args.username),
                     max_pages=args.max_sync_pages,
-                ):
-                    row_counts = boardlib.db.aurora.sync_shared_tables(
-                        db_path, sync_result
-                    )
-                    for table_name, row_count in row_counts.items():
-                        row_counts_totals[table_name] = (
-                            row_counts_totals.get(table_name, 0) + row_count
-                        )
-                        print(
-                            f"[{board}] Synchronized page of {table_name}. "
-                            f"Page size: {row_count}. Cumulative: {row_counts_totals[table_name]}"
-                        )
+                    progress=lambda table_name, row_count, total: print(
+                        f"[{board}] Synchronized page of {table_name}. "
+                        f"Page size: {row_count}. Cumulative: {total}"
+                    ),
+                )
             except Exception as e:
                 print(f"[{board}] Warning: sync failed: {e}")
 

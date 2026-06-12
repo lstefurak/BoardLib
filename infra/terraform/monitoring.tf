@@ -206,3 +206,57 @@ resource "aws_cloudwatch_dashboard" "boardlog" {
     ]
   })
 }
+
+# --- Alarms ----------------------------------------------------------------
+# The metric filters above are only useful if something watches them. These
+# alarms notify on the two abuse signals that matter for a public Function URL:
+# sustained auth failures (credential stuffing / probing) and any throttling
+# (the reserved-concurrency cap locking out the legitimate user). Set
+# var.alarm_actions to an SNS topic ARN to get notified; without it the alarms
+# still show their state in the console.
+
+resource "aws_cloudwatch_metric_alarm" "auth_failures" {
+  alarm_name          = "${var.function_name}-auth-failures"
+  alarm_description   = "Sustained 403s against the public BoardLog endpoint (possible credential stuffing)."
+  namespace           = local.metrics_namespace
+  metric_name         = "AuthFailures"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 3
+  threshold           = var.auth_failure_alarm_threshold
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = var.alarm_actions
+  ok_actions          = var.alarm_actions
+}
+
+resource "aws_cloudwatch_metric_alarm" "throttles" {
+  alarm_name          = "${var.function_name}-throttles"
+  alarm_description   = "Lambda throttling: the reserved-concurrency cap is being hit, locking out legitimate use."
+  namespace           = "AWS/Lambda"
+  metric_name         = "Throttles"
+  dimensions          = { FunctionName = var.function_name }
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = var.alarm_actions
+  ok_actions          = var.alarm_actions
+}
+
+resource "aws_cloudwatch_metric_alarm" "server_errors" {
+  alarm_name          = "${var.function_name}-server-errors"
+  alarm_description   = "Repeated 502s from the BoardLog handler."
+  namespace           = local.metrics_namespace
+  metric_name         = "ServerErrors"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 2
+  threshold           = var.server_error_alarm_threshold
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = var.alarm_actions
+  ok_actions          = var.alarm_actions
+}

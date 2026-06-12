@@ -7,7 +7,11 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $buildRoot = Join-Path $repoRoot "build/lambda-package"
-$zipPath = Join-Path $repoRoot $OutputPath
+$zipPath = if ([System.IO.Path]::IsPathRooted($OutputPath)) {
+    $OutputPath
+} else {
+    Join-Path $repoRoot $OutputPath
+}
 $zipDir = Split-Path $zipPath -Parent
 
 if (Test-Path $buildRoot) {
@@ -24,6 +28,12 @@ python -m pip install `
     --python-version $PythonRuntime `
     --only-binary=:all: `
     --upgrade
+
+# $ErrorActionPreference does not apply to native executables; without this
+# check a failed pip install would still produce (and report) a broken zip.
+if ($LASTEXITCODE -ne 0) {
+    throw "pip install failed with exit code $LASTEXITCODE; not building the package."
+}
 
 Copy-Item -Path (Join-Path $repoRoot "src/boardlib") -Destination (Join-Path $buildRoot "boardlib") -Recurse
 New-Item -ItemType Directory -Path (Join-Path $buildRoot "backend") | Out-Null

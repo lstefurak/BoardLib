@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hmac
 import json
 import os
@@ -7,6 +8,8 @@ import pathlib
 import sys
 import traceback
 from typing import Any
+
+import requests
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "src"))
 
@@ -27,6 +30,12 @@ ACCESS_SECRET = ("BOARDLOG_ACCESS_KEY", "BOARDLOG_ACCESS_KEY_PARAM")
 
 _secret_cache: dict[str, str] = {}
 
+DEFAULT_MAX_SYNC_PAGES = 100
+
+
+class BoardLoginError(Exception):
+    """The board API rejected the user's credentials."""
+
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     method = event.get("requestContext", {}).get("http", {}).get("method", event.get("httpMethod", ""))
@@ -43,6 +52,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     action = str(body.get("action", "")).strip().lower()
     board = str(body.get("board", "tension")).strip().lower()
     username = str(body.get("username", "")).strip()
+    log_action = "unlock" if action == "unlock" else "export"
 
     try:
         # The gate "Enter" button verifies only the gate phrase, server-side.
@@ -79,32 +89,60 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             board=board,
             row_count=len(rows),
         )
-    except ValueError as error:
-        return log_and_respond(400, {"error": str(error)}, action="export", username=username, board=board)
+    except BoardLoginError as error:
+        return log_and_respond(401, {"error": str(error)}, action=log_action, username=username, board=board)
     except Exception as error:
-        print("BoardLog export failed:", type(error).__name__, str(error))
+        # Anything else is a server-side fault. The detail goes to the log only;
+        # the client gets a generic message so internals never leak.
+        print("BoardLog request failed:", type(error).__name__, str(error))
         print(traceback.format_exc())
-        return log_and_respond(502, {"error": "Export failed"}, action="export", username=username, board=board)
+        return log_and_respond(
+            502,
+            {"error": "Gate check failed" if log_action == "unlock" else "Export failed"},
+            action=log_action,
+            username=username,
+            board=board,
+        )
 
 
 def parse_body(event: dict[str, Any]) -> dict[str, Any]:
     body = event.get("body") or "{}"
     if event.get("isBase64Encoded"):
-        raise ValueError("Base64 request bodies are not supported")
-    parsed = json.loads(body)
+        # Function URLs base64-encode the body for any Content-Type not on
+        # their text allowlist (e.g. curl's default form encoding).
+        try:
+            body = base64.b64decode(body).decode("utf-8")
+        except (ValueError, UnicodeDecodeError) as error:
+            raise ValueError("Request body is not valid base64-encoded UTF-8") from error
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError as error:
+        raise ValueError("Request body is not valid JSON") from error
     if not isinstance(parsed, dict):
         raise ValueError("JSON body must be an object")
     return parsed
 
 
+def running_in_lambda() -> bool:
+    return bool(os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+
+
 def check_secret(event: dict[str, Any], header: str, secret_source: tuple[str, str]) -> bool:
     """Constant-time check of a request header against a configured secret.
 
-    Returns True when the secret is not configured at all, so a check can be
-    disabled simply by leaving both its env var and SSM parameter unset.
+    Locally (tests/dev) a check whose secret is not configured is disabled.
+    In Lambda, where the Function URL is public, an unconfigured secret is
+    treated as a deployment error and the check FAILS CLOSED — otherwise a
+    typo in one env var name would silently turn off authentication.
     """
     expected = resolve_secret(*secret_source)
     if not expected:
+        if running_in_lambda():
+            print(
+                f"WARNING: secret for header '{header}' is not configured "
+                f"(set {secret_source[0]} or {secret_source[1]}); refusing request"
+            )
+            return False
         return True
     provided = request_header(event, header)
     # Encode to bytes: hmac.compare_digest raises TypeError on non-ASCII str,
@@ -166,17 +204,28 @@ def ensure_database(board: str, db_path: pathlib.Path, username: str, password: 
     if not db_path.exists():
         boardlib.db.aurora.download_database(board, db_path)
 
-    token = boardlib.api.aurora.login(board, username, password)["token"]
-    max_pages = int(os.environ.get("BOARDLOG_MAX_SYNC_PAGES", "100"))
-    tables_and_sync_dates = boardlib.db.aurora.get_shared_syncs(db_path)
-    for sync_result in boardlib.api.aurora.sync(
-        board,
-        tables_and_sync_dates,
-        token=token,
-        max_pages=max_pages,
-    ):
-        boardlib.db.aurora.sync_shared_tables(db_path, sync_result)
+    try:
+        token = boardlib.api.aurora.login(board, username, password)["token"]
+    except ValueError as error:
+        # aurora.login raises ValueError on 422 (invalid credentials).
+        raise BoardLoginError(str(error)) from error
+    except requests.exceptions.HTTPError as error:
+        status = getattr(error.response, "status_code", None)
+        if status in (400, 401, 403):
+            raise BoardLoginError("Board login failed; check your username and password") from error
+        raise
+    boardlib.api.aurora.sync_local_database(board, db_path, token, max_pages=max_sync_pages())
     return token
+
+
+def max_sync_pages() -> int:
+    configured = os.environ.get("BOARDLOG_MAX_SYNC_PAGES", "")
+    try:
+        return int(configured)
+    except ValueError:
+        if configured:
+            print(f"WARNING: BOARDLOG_MAX_SYNC_PAGES={configured!r} is not an integer; using {DEFAULT_MAX_SYNC_PAGES}")
+        return DEFAULT_MAX_SYNC_PAGES
 
 
 def log_and_respond(

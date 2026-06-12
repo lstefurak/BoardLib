@@ -60,7 +60,7 @@ public cannot read.**
 | Secret leaks via infrastructure-as-code | Secrets are SSM SecureStrings created out-of-band, so their plaintext never enters terraform state, the repo, or the Lambda console env vars. They are encrypted at rest with KMS and decrypted only in the Lambda's memory at request time. |
 | One secret is compromised | The two secrets are **independent parameters**. Rotating one (`aws ssm put-parameter --overwrite`) does not affect the other and needs no redeploy. |
 | Password theft | The Tension password is forwarded to Tension for a single request and never persisted; request-body logging is disabled by convention. The real data authority is Tension's own auth. |
-| Abuse / cost / DoS on the public endpoint | Function URL with restrictive CORS plus the required access key; concurrency can be capped in terraform if needed. |
+| Abuse / cost / DoS on the public endpoint | Function URL with restrictive CORS plus the required access key; concurrency is capped via `reserved_concurrency` in terraform (default 5), with CloudWatch alarms on throttles and sustained 403s. |
 
 ### Trust boundaries
 
