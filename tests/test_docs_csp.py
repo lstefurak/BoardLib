@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 
 DOCS_INDEX = Path(__file__).resolve().parents[1] / "docs" / "index.html"
 DOCS_APP = Path(__file__).resolve().parents[1] / "docs" / "app.js"
-SAMPLE_CSV = Path(__file__).resolve().parents[1] / "data" / "tension-logbook.csv"
+SAMPLE_CSV = Path(__file__).resolve().parent / "fixtures" / "tension-logbook-sample.csv"
 
 
 def test_csp_allows_lambda_function_urls_in_any_region():
