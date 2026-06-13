@@ -238,7 +238,12 @@ function loadRows(rows, sourceLabel, rawRows) {
 function csvCell(value) {
   if (value === null || value === undefined) return "";
   // Source rows from the API carry real booleans; BoardLib CSVs use True/False.
-  const text = typeof value === "boolean" ? (value ? "True" : "False") : String(value);
+  let text = typeof value === "boolean" ? (value ? "True" : "False") : String(value);
+  // Neutralize CSV/formula injection: climb names and comments are board/user-
+  // authored, so a cell starting with = + - @ (or tab/CR) could be run as a
+  // formula when the export is opened in Excel/Sheets. Prefix a single quote to
+  // force the spreadsheet to treat it as literal text.
+  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
