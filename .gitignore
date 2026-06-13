@@ -14,3 +14,4 @@ build/
 *.tfplan
 tfplan
 terraform.tfvars
+docs/site.config.local.js

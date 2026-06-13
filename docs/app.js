@@ -1,53 +1,32 @@
 const config = window.BOARDLOG_CONFIG || {};
+// Local dev overrides (gitignored docs/site.config.local.js, generated from
+// .env by scripts/serve_local.py). Absent in production.
+const local = window.BOARDLOG_LOCAL || {};
+const IS_LOCAL = ["localhost", "127.0.0.1", "[::1]", ""].includes(location.hostname);
 const state = {
   gate: "",
-  accessKey: "",
   rows: [],
   sessions: [],
   gradeOrder: [],
   selectedIndex: 0,
-  sourceLabel: "",
 };
 
 const $ = (id) => document.getElementById(id);
 
-function setStep(step) {
-  document.body.dataset.step = step;
-}
-
-function updateKeyStatus() {
-  $("keyStatus").textContent = state.accessKey ? "set" : "not set";
-}
-
-function updateStatusPill() {
-  const pill = $("statusPill");
-  if (!state.gate) {
-    pill.textContent = "Locked";
-  } else if (state.rows.length) {
-    pill.textContent = `${state.rows.length} rows`;
-  } else {
-    pill.textContent = "Unlocked";
-  }
-}
-
 function setStatus(message, tone = "muted") {
   const status = $("status");
-  $("statusMessage").textContent = message;
-  status.classList.remove("is-error", "is-good", "is-busy");
-  if (tone === "error") status.classList.add("is-error");
-  if (tone === "good") status.classList.add("is-good");
-  if (tone === "busy") status.classList.add("is-busy");
-}
-
-function setFetchBusy(isBusy) {
-  const submitButton = $("fetchButton");
-  submitButton.disabled = isBusy;
-  submitButton.classList.toggle("is-busy-button", isBusy);
-  submitButton.querySelector("[data-button-label]").textContent = isBusy ? "Fetching..." : "Fetch Logbook";
+  status.textContent = message;
+  status.style.color = tone === "error" ? "#8a1f11" : tone === "good" ? "#0f766e" : "";
 }
 
 function currentEndpoint() {
-  return ($("endpointInput").value || config.defaultEndpoint || "").trim();
+  const typed = $("endpointInput").value.trim();
+  if (typed) return typed;
+  // On localhost, don't silently fall back to the production Function URL — a
+  // cross-origin call to it just CORS-fails. Use a local override only if one
+  // was supplied; otherwise run backend-free (gate opens, CSV still works).
+  if (IS_LOCAL) return (local.endpoint || "").trim();
+  return (config.defaultEndpoint || "").trim();
 }
 
 // The Function URL is public; the gate phrase and access key are sent as
@@ -66,9 +45,18 @@ async function verifyGate(phrase) {
   const endpoint = currentEndpoint();
   // CSV-only use has no backend and nothing to protect, so open the door locally.
   if (!endpoint) return;
-  const response = await callBackend(endpoint, { action: "unlock" }, { "X-Board-Gate": phrase });
-  if (response.status === 403) throw new Error("The door stays shut.");
-  if (!response.ok) throw new Error(`Gate check failed (HTTP ${response.status}).`);
+  try {
+    const response = await callBackend(endpoint, { action: "unlock" }, { "X-Board-Gate": phrase });
+    if (response.status === 403) throw new Error("The door stays shut.");
+    if (!response.ok) throw new Error(`Gate check failed (HTTP ${response.status}).`);
+  } catch (error) {
+    // From localhost the Function URL is cross-origin and the browser blocks the
+    // response (CORS) — fetch rejects with a TypeError before we see a status.
+    // That is expected in local dev, so open the door instead of trapping the
+    // tester at the gate. A genuine 403 (handled above) still throws in prod.
+    if (IS_LOCAL && error instanceof TypeError) return;
+    throw error;
+  }
 }
 
 async function unlock(phrase) {
@@ -77,25 +65,22 @@ async function unlock(phrase) {
   sessionStorage.setItem("boardlog:gate", phrase);
   $("gate").classList.add("is-hidden");
   $("app").classList.remove("is-hidden");
-  setStep(state.rows.length ? "analyze" : "load");
-  updateStatusPill();
 }
 
 function lock() {
   state.gate = "";
-  state.accessKey = "";
   sessionStorage.removeItem("boardlog:gate");
   sessionStorage.removeItem("boardlog:key");
   $("app").classList.add("is-hidden");
   $("gate").classList.remove("is-hidden");
   $("knockInput").value = "";
-  // Clear the secrets from the DOM too, or they stay one "Show" click away.
-  $("keyInput").value = "";
+  // Clear the secrets from the DOM too, or they stay one "Show" click away,
+  // and return any revealed field to dots.
+  $("accessKeyInput").value = "";
   $("passwordInput").value = "";
-  updateKeyStatus();
-  setStep("unlock");
-  updateStatusPill();
-  if ($("keyDialog").open) $("keyDialog").close();
+  hideSecret($("accessKeyInput"));
+  hideSecret($("passwordInput"));
+  hideSecret($("knockInput"));
 }
 
 function parseCsv(text) {
@@ -148,7 +133,7 @@ function cleanText(value) {
 }
 
 // Normalizes rows from either source: CSV rows carry string flags ("true"),
-// API JSON rows carry real booleans; parseBool handles both.
+// API JSON rows carry real booleans — parseBool handles both.
 function normalizeRows(rawRows) {
   return rawRows.map((row) => {
     const date = new Date(cleanText(row.date).replace(" ", "T"));
@@ -221,18 +206,6 @@ function loadJsonPayload(payload, sourceLabel) {
   loadRows(normalizeRows(rows), sourceLabel);
 }
 
-function collapseConnectPanel() {
-  $("connectBody").classList.add("is-hidden");
-  $("connectSummary").classList.remove("is-hidden");
-  $("connectSummaryText").textContent = `${state.rows.length} rows loaded from ${state.sourceLabel}.`;
-}
-
-function expandConnectPanel() {
-  $("connectBody").classList.remove("is-hidden");
-  $("connectSummary").classList.add("is-hidden");
-  setStep("load");
-}
-
 function loadRows(rows, sourceLabel) {
   // Validate before touching state, so a failed load leaves the previously
   // rendered dashboard fully working instead of pointing at empty sessions.
@@ -244,12 +217,8 @@ function loadRows(rows, sourceLabel) {
   state.sessions = summary.sessions;
   state.gradeOrder = summary.gradeOrder;
   state.selectedIndex = state.sessions.length - 1;
-  state.sourceLabel = sourceLabel;
   $("dashboard").classList.remove("is-hidden");
-  setStep("analyze");
   setStatus(`Loaded ${state.rows.length} rows from ${sourceLabel}.`, "good");
-  collapseConnectPanel();
-  updateStatusPill();
   renderSessionOptions();
   render();
 }
@@ -305,52 +274,19 @@ function escapeHtml(value) {
   );
 }
 
-function statIcon(name) {
-  const paths = {
-    sends: "<path d='M7 12l3 3 7-8'></path>",
-    climbs: "<path d='M8 4v16M16 4v16M4 8h16M4 16h16'></path>",
-    tries: "<path d='M4 12a8 8 0 111.9 5.2'></path><path d='M4 18v-6h6'></path>",
-    benchmarks: "<path d='M12 3l2.7 5.5 6.1.9-4.4 4.3 1 6.1L12 16.9 6.6 19.8l1-6.1-4.4-4.3 6.1-.9L12 3z'></path>",
-    repeats: "<path d='M17 2l4 4-4 4'></path><path d='M3 11V9a3 3 0 013-3h15'></path><path d='M7 22l-4-4 4-4'></path><path d='M21 13v2a3 3 0 01-3 3H3'></path>",
-  };
-  return `<svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
-}
-
-function typeBadges(row) {
-  const result = row.is_ascent
-    ? "<span class='badge badge-send'>send</span>"
-    : "<span class='badge badge-attempt'>attempt</span>";
-  const benchmark = row.is_benchmark ? "<span class='badge badge-benchmark'>benchmark</span>" : "";
-  return result + benchmark;
-}
-
-function emptyChartMarkup() {
-  return `<div class="empty-chart">
-    <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true">
-      <rect x="12" y="8" width="40" height="48" rx="7"></rect>
-      <circle cx="24" cy="21" r="3"></circle>
-      <circle cx="40" cy="23" r="4"></circle>
-      <circle cx="29" cy="37" r="4"></circle>
-      <circle cx="44" cy="44" r="3"></circle>
-    </svg>
-    <p class="hint">No ascents logged for this day.</p>
-  </div>`;
-}
-
 function render() {
   const session = state.sessions[state.selectedIndex];
   $("sessionSelect").value = String(state.selectedIndex);
-  $("sessionHeading").textContent = formatDate(session.date);
 
   const stats = [
-    ["sends", "Ascents", session.ascents],
-    ["climbs", "Unique climbs", session.unique_climbs],
-    ["tries", "Total tries", session.total_tries],
-    ["benchmarks", "Benchmarks", session.benchmarks],
-    ["repeats", "Repeats", session.repeats],
+    ["Ascents", session.ascents],
+    ["Unique climbs", session.unique_climbs],
+    ["Total tries", session.total_tries],
+    ["Benchmarks", session.benchmarks],
+    ["Repeats", session.repeats],
   ];
-  $("stats").innerHTML = stats.map(([icon, label, value]) => (
-    `<div class="stat">${statIcon(icon)}<div><strong>${value}</strong><span>${label}</span></div></div>`
+  $("stats").innerHTML = stats.map(([label, value]) => (
+    `<div class="stat"><strong>${value}</strong><span>${label}</span></div>`
   )).join("");
 
   const maxCount = Math.max(1, ...Object.values(session.grade_counts));
@@ -364,7 +300,7 @@ function render() {
         <div class="bar-track"><div class="bar" style="width:${width}%"></div></div>
         <div class="bar-count">${count}</div>
       </div>`;
-    }).join("") || emptyChartMarkup();
+    }).join("") || "<p class='hint'>No ascents logged for this day.</p>";
 
   $("workoutLog").textContent = workoutText(session);
   $("climbRows").innerHTML = currentSessionRows().map((row) => (
@@ -374,28 +310,9 @@ function render() {
       <td>${escapeHtml(row.logged_grade)}</td>
       <td>${row.angle}</td>
       <td>${row.tries}</td>
-      <td>${typeBadges(row)}</td>
+      <td>${row.is_ascent ? "send" : "attempt"}${row.is_benchmark ? ", benchmark" : ""}</td>
     </tr>`
   )).join("");
-}
-
-function openKeyDialog(message) {
-  if (message) setStatus(message, "error");
-  $("keyInput").value = state.accessKey;
-  $("keyDialog").showModal();
-  $("keyInput").focus();
-}
-
-function setActiveTab(tabName) {
-  document.querySelectorAll(".tab").forEach((tab) => {
-    const isActive = tab.dataset.tab === tabName;
-    tab.classList.toggle("is-active", isActive);
-    tab.setAttribute("aria-selected", String(isActive));
-    tab.tabIndex = isActive ? 0 : -1;
-  });
-  document.querySelectorAll("[data-panel]").forEach((panel) => {
-    panel.classList.toggle("is-hidden", panel.dataset.panel !== tabName);
-  });
 }
 
 $("knockForm").addEventListener("submit", async (event) => {
@@ -409,40 +326,15 @@ $("knockForm").addEventListener("submit", async (event) => {
 });
 
 $("lockButton").addEventListener("click", lock);
-$("loadDifferentButton").addEventListener("click", expandConnectPanel);
-$("changeKeyButton").addEventListener("click", () => openKeyDialog());
-$("cancelKeyButton").addEventListener("click", () => $("keyDialog").close());
 
-$("keyForm").addEventListener("submit", (event) => {
-  event.preventDefault();
-  state.accessKey = $("keyInput").value.trim();
-  updateKeyStatus();
-  $("keyDialog").close();
-  setStatus(state.accessKey ? "Access key ready for the next export." : "Access key cleared.", "muted");
-});
-
-const tabs = Array.from(document.querySelectorAll(".tab"));
-tabs.forEach((tab) => {
-  tab.addEventListener("click", () => setActiveTab(tab.dataset.tab));
-  tab.addEventListener("keydown", (event) => {
-    if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
-    event.preventDefault();
-    const step = event.key === "ArrowRight" ? 1 : -1;
-    const next = tabs[(tabs.indexOf(tab) + step + tabs.length) % tabs.length];
-    setActiveTab(next.dataset.tab);
-    next.focus();
-  });
-});
-
-document.querySelectorAll("[data-reveal-for]").forEach((toggle) => {
-  toggle.addEventListener("click", () => {
-    const input = $(toggle.dataset.revealFor);
-    if (!input) return;
-    const reveal = input.type === "password";
-    input.type = reveal ? "text" : "password";
-    toggle.textContent = reveal ? "Hide" : "Show";
-  });
-});
+// Return a password field to dots and reset its reveal toggle (the toggle is
+// inserted as the input's next sibling further down).
+function hideSecret(input) {
+  if (!input) return;
+  input.type = "password";
+  const toggle = input.nextElementSibling;
+  if (toggle && toggle.classList.contains("reveal-toggle")) toggle.textContent = "Show";
+}
 
 let exportInFlight = false;
 
@@ -456,13 +348,11 @@ $("apiForm").addEventListener("submit", async (event) => {
     setStatus("Add a private export endpoint first.", "error");
     return;
   }
-  if (!state.accessKey) {
-    openKeyDialog("Enter the Board Room access key before fetching.");
-    return;
-  }
+  const accessKey = $("accessKeyInput").value.trim();
+  const submitButton = $("apiForm").querySelector('button[type="submit"]');
   exportInFlight = true;
-  setFetchBusy(true);
-  setStatus("Requesting export...", "busy");
+  if (submitButton) submitButton.disabled = true;
+  setStatus("Requesting export...");
   try {
     const response = await callBackend(
       endpoint,
@@ -471,10 +361,9 @@ $("apiForm").addEventListener("submit", async (event) => {
         username: $("usernameInput").value.trim(),
         password: $("passwordInput").value,
       },
-      { "X-Board-Gate": state.gate, "X-Board-Room-Key": state.accessKey },
+      { "X-Board-Gate": state.gate, "X-Board-Room-Key": accessKey },
     );
     if (response.status === 403) {
-      sessionStorage.removeItem("boardlog:key");
       throw new Error("Backend rejected the gate phrase or access key (403).");
     }
     if (response.status === 401) {
@@ -482,21 +371,27 @@ $("apiForm").addEventListener("submit", async (event) => {
     }
     if (!response.ok) throw new Error(`Export failed with HTTP ${response.status}`);
     // Only remember the key once the backend has accepted it.
-    sessionStorage.setItem("boardlog:key", state.accessKey);
+    sessionStorage.setItem("boardlog:key", accessKey);
     const payload = await response.json();
     loadJsonPayload(payload, "private export endpoint");
+    // Clear the password only after a successful load. On failure, keep it so
+    // the user can retry without retyping.
+    $("passwordInput").value = "";
   } catch (error) {
     setStatus(error.message, "error");
-    if (String(error.message).includes("access key")) {
-      state.accessKey = "";
-      updateKeyStatus();
-      openKeyDialog(error.message);
-    }
   } finally {
-    $("passwordInput").value = "";
+    // Whatever happened, return the password field to dots (it may have been
+    // revealed via "Show"); the typed value is preserved unless we cleared it.
+    hideSecret($("passwordInput"));
     exportInFlight = false;
-    setFetchBusy(false);
+    if (submitButton) submitButton.disabled = false;
   }
+});
+
+// Make the Load CSV button look armed once a file is picked.
+$("csvInput").addEventListener("change", () => {
+  const button = $("csvForm").querySelector('button[type="submit"]');
+  if (button) button.classList.toggle("is-ready", $("csvInput").files.length > 0);
 });
 
 $("csvForm").addEventListener("submit", async (event) => {
@@ -506,35 +401,6 @@ $("csvForm").addEventListener("submit", async (event) => {
     setStatus("Choose a CSV file first.", "error");
     return;
   }
-  try {
-    loadCsvText(await file.text(), file.name);
-  } catch (error) {
-    setStatus(error.message, "error");
-  }
-});
-
-$("csvInput").addEventListener("change", () => {
-  const file = $("csvInput").files[0];
-  if (file) setStatus(`${file.name} selected.`, "muted");
-});
-
-["dragenter", "dragover"].forEach((eventName) => {
-  $("csvDropZone").addEventListener(eventName, (event) => {
-    event.preventDefault();
-    $("csvDropZone").classList.add("is-dragging");
-  });
-});
-
-["dragleave", "drop"].forEach((eventName) => {
-  $("csvDropZone").addEventListener(eventName, (event) => {
-    event.preventDefault();
-    $("csvDropZone").classList.remove("is-dragging");
-  });
-});
-
-$("csvDropZone").addEventListener("drop", async (event) => {
-  const file = event.dataTransfer.files[0];
-  if (!file) return;
   try {
     loadCsvText(await file.text(), file.name);
   } catch (error) {
@@ -565,19 +431,45 @@ $("copyLog").addEventListener("click", async () => {
   }, 1200);
 });
 
-if (config.defaultEndpoint) {
-  $("endpointInput").value = config.defaultEndpoint;
+// Prefill the endpoint: a local override on localhost, the shipped default in
+// production. Leaving it blank locally keeps the page from calling production.
+const prefillEndpoint = IS_LOCAL ? local.endpoint : config.defaultEndpoint;
+if (prefillEndpoint) {
+  $("endpointInput").value = prefillEndpoint;
+}
+
+// Local dev convenience: prefill the gate phrase from .env so you only press
+// Enter to get past the (unchanged) gate page.
+if (IS_LOCAL && local.knock && !sessionStorage.getItem("boardlog:gate")) {
+  $("knockInput").value = local.knock;
 }
 
 const storedKey = sessionStorage.getItem("boardlog:key");
 if (storedKey) {
-  state.accessKey = storedKey;
-  updateKeyStatus();
+  $("accessKeyInput").value = storedKey;
+} else {
+  // First visit (no remembered key): open Room Access so the endpoint and key
+  // fields are visible. Once a key sticks, this stays collapsed and the user
+  // just types username/password.
+  $("roomAccess").open = true;
 }
-
-updateStatusPill();
 
 const storedGate = sessionStorage.getItem("boardlog:gate");
 if (storedGate) {
   unlock(storedGate).catch(() => lock());
 }
+
+// Add a show/hide toggle to every password field.
+document.querySelectorAll('input[type="password"]').forEach((input) => {
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "reveal-toggle";
+  toggle.textContent = "Show";
+  toggle.setAttribute("aria-label", "Show or hide the value");
+  toggle.addEventListener("click", () => {
+    const reveal = input.type === "password";
+    input.type = reveal ? "text" : "password";
+    toggle.textContent = reveal ? "Hide" : "Show";
+  });
+  input.insertAdjacentElement("afterend", toggle);
+});
