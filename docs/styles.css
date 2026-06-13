@@ -185,6 +185,45 @@ h2 {
   margin-top: 22px;
 }
 
+.source-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+
+.source-label {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.source-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.source-actions .ghost {
+  min-height: 38px;
+  padding: 0 14px;
+  font-weight: 600;
+}
+
+.text-button {
+  min-height: 38px;
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.text-button:hover {
+  filter: none;
+  text-decoration: underline;
+}
+
 .toolbar {
   display: flex;
   gap: 8px;
