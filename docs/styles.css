@@ -545,13 +545,11 @@ button.primary:disabled {
   gap: 14px;
 }
 
-/* The native file control inherits the text-input box; align its contents and
+/* The native file control inherits the text-input box. Centre its contents with
+   symmetric padding (flex stretches the file-selector button in Chrome) and
    give the "Choose file" button the same look as the rest of the card. */
 .csv-form input[type="file"] {
-  display: flex;
-  align-items: center;
-  min-height: 46px;
-  padding: 0 10px;
+  padding: 8px 10px;
   color: var(--muted);
   font-size: 13px;
   cursor: pointer;
@@ -559,7 +557,7 @@ button.primary:disabled {
 
 .csv-form input[type="file"]::file-selector-button {
   margin-right: 12px;
-  min-height: 34px;
+  min-height: 30px;
   padding: 0 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -568,6 +566,7 @@ button.primary:disabled {
   font: inherit;
   font-size: 13px;
   font-weight: 600;
+  vertical-align: middle;
   cursor: pointer;
 }
 
@@ -575,8 +574,30 @@ button.primary:disabled {
   background: #e2efec;
 }
 
+/* "Load CSV" reads as a real button: soft by default, accent once a file is
+   chosen (app.js toggles .is-ready on change). */
 .csv-form button {
   width: 100%;
+  background: var(--soft);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.csv-form button:hover {
+  background: #e2efec;
+  filter: none;
+}
+
+.csv-form button.is-ready {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.csv-form button.is-ready:hover {
+  background: var(--accent);
+  filter: brightness(1.06);
 }
 
 .auth-card .status {

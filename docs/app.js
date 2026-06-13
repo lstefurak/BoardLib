@@ -74,9 +74,13 @@ function lock() {
   $("app").classList.add("is-hidden");
   $("gate").classList.remove("is-hidden");
   $("knockInput").value = "";
-  // Clear the secrets from the DOM too, or they stay one "Show" click away.
+  // Clear the secrets from the DOM too, or they stay one "Show" click away,
+  // and return any revealed field to dots.
   $("accessKeyInput").value = "";
   $("passwordInput").value = "";
+  hideSecret($("accessKeyInput"));
+  hideSecret($("passwordInput"));
+  hideSecret($("knockInput"));
 }
 
 function parseCsv(text) {
@@ -323,6 +327,15 @@ $("knockForm").addEventListener("submit", async (event) => {
 
 $("lockButton").addEventListener("click", lock);
 
+// Return a password field to dots and reset its reveal toggle (the toggle is
+// inserted as the input's next sibling further down).
+function hideSecret(input) {
+  if (!input) return;
+  input.type = "password";
+  const toggle = input.nextElementSibling;
+  if (toggle && toggle.classList.contains("reveal-toggle")) toggle.textContent = "Show";
+}
+
 let exportInFlight = false;
 
 $("apiForm").addEventListener("submit", async (event) => {
@@ -361,13 +374,24 @@ $("apiForm").addEventListener("submit", async (event) => {
     sessionStorage.setItem("boardlog:key", accessKey);
     const payload = await response.json();
     loadJsonPayload(payload, "private export endpoint");
+    // Clear the password only after a successful load. On failure, keep it so
+    // the user can retry without retyping.
+    $("passwordInput").value = "";
   } catch (error) {
     setStatus(error.message, "error");
   } finally {
-    $("passwordInput").value = "";
+    // Whatever happened, return the password field to dots (it may have been
+    // revealed via "Show"); the typed value is preserved unless we cleared it.
+    hideSecret($("passwordInput"));
     exportInFlight = false;
     if (submitButton) submitButton.disabled = false;
   }
+});
+
+// Make the Load CSV button look armed once a file is picked.
+$("csvInput").addEventListener("change", () => {
+  const button = $("csvForm").querySelector('button[type="submit"]');
+  if (button) button.classList.toggle("is-ready", $("csvInput").files.length > 0);
 });
 
 $("csvForm").addEventListener("submit", async (event) => {
