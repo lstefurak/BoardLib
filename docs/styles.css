@@ -513,19 +513,27 @@ button.primary:disabled {
 
 /* "Load a CSV instead" fallback. */
 .csv-fallback {
-  margin-top: 18px;
-  padding-top: 16px;
+  margin-top: 20px;
+  padding-top: 18px;
   border-top: 1px solid var(--line);
 }
 
 .csv-fallback > summary {
-  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  color: var(--muted);
+  transition: background .15s ease, color .15s ease;
+}
+
+.csv-fallback > summary:hover {
+  background: var(--soft);
+  color: var(--ink);
 }
 
 .csv-fallback > summary .summary-label {
   font-size: 13px;
   font-weight: 600;
-  color: var(--muted);
+  color: inherit;
 }
 
 .csv-fallback[open] > summary {
@@ -534,7 +542,37 @@ button.primary:disabled {
 
 .csv-form {
   display: grid;
-  gap: 12px;
+  gap: 14px;
+}
+
+/* The native file control inherits the text-input box; align its contents and
+   give the "Choose file" button the same look as the rest of the card. */
+.csv-form input[type="file"] {
+  display: flex;
+  align-items: center;
+  min-height: 46px;
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.csv-form input[type="file"]::file-selector-button {
+  margin-right: 12px;
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.csv-form input[type="file"]::file-selector-button:hover {
+  background: #e2efec;
 }
 
 .csv-form button {
