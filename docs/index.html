@@ -11,82 +11,145 @@
   <title>The Board Room</title>
   <link rel="stylesheet" href="styles.css">
 </head>
-<body>
+<body data-step="unlock">
+  <svg class="svg-defs" aria-hidden="true" focusable="false">
+    <symbol id="logoMark" viewBox="0 0 64 64">
+      <rect x="10" y="8" width="44" height="50" rx="8" fill="none" stroke="currentColor" stroke-width="3"></rect>
+      <circle cx="22" cy="20" r="3" fill="currentColor"></circle>
+      <circle cx="38" cy="20" r="5" fill="currentColor"></circle>
+      <circle cx="30" cy="31" r="4" fill="currentColor"></circle>
+      <circle cx="45" cy="34" r="3" fill="currentColor"></circle>
+      <circle cx="20" cy="43" r="5" fill="currentColor"></circle>
+      <circle cx="36" cy="49" r="3" fill="currentColor"></circle>
+    </symbol>
+  </svg>
   <main class="shell">
     <section class="gate" id="gate">
-      <div>
+      <div class="gate-card">
+        <svg class="logo-mark logo-mark-large" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><use href="#logoMark"></use></svg>
         <p class="eyebrow">after hours</p>
         <h1>The Board Room</h1>
         <p class="lede">Session notes for people who know what they are looking for.</p>
+
+        <form class="knock" id="knockForm">
+          <label for="knockInput">Knock</label>
+          <div class="inline-control">
+            <span class="secret-field">
+              <input id="knockInput" name="knock" type="password" autocomplete="off" placeholder="say the quiet part">
+              <button class="reveal-toggle" type="button" data-reveal-for="knockInput" aria-label="Show or hide the knock">Show</button>
+            </span>
+            <button type="submit">Enter</button>
+          </div>
+          <p class="hint">The knock opens the door. Inside, the room remembers every session you've ever logged.</p>
+        </form>
       </div>
-      <form class="knock" id="knockForm">
-        <label for="knockInput">Knock</label>
-        <div class="inline-control">
-          <input id="knockInput" name="knock" type="password" autocomplete="off" placeholder="say the quiet part">
-          <button type="submit">Enter</button>
-        </div>
-        <p class="hint">The knock opens the door. Inside, the room remembers every session you've ever logged.</p>
-      </form>
     </section>
 
     <section class="app is-hidden" id="app">
-      <header>
-        <div>
-          <p class="eyebrow">board log</p>
-          <h1>Session Visualizer</h1>
-          <p class="lede">Load a BoardLib CSV or ask a private export endpoint for one.</p>
+      <header class="topbar">
+        <div class="brand">
+          <svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><use href="#logoMark"></use></svg>
+          <div>
+            <p class="wordmark">BoardLog</p>
+            <p class="tagline">Indoor board sessions</p>
+          </div>
         </div>
-        <button class="ghost" id="lockButton">Lock</button>
+        <div class="topbar-actions">
+          <span class="status-pill" id="statusPill">Locked</span>
+          <button class="ghost" id="lockButton" type="button" title="Lock the room and clear secrets">Lock</button>
+        </div>
       </header>
 
-      <section class="panel">
-        <div class="tabs" role="tablist" aria-label="Data source">
-          <button class="tab is-active" type="button" data-tab="api">Connect</button>
-          <button class="tab" type="button" data-tab="csv">CSV</button>
+      <nav class="step-rail" aria-label="Progress">
+        <span data-step-item="unlock">Unlock</span>
+        <span data-step-item="load">Load data</span>
+        <span data-step-item="analyze">Analyze</span>
+      </nav>
+
+      <section class="panel" id="connectPanel">
+        <div class="panel-summary is-hidden" id="connectSummary">
+          <span id="connectSummaryText">No logbook loaded.</span>
+          <button class="link-button" id="loadDifferentButton" type="button">Load different data</button>
         </div>
 
-        <form class="source-grid" id="apiForm" data-panel="api">
-          <label>
-            Lambda Function URL
-            <input id="endpointInput" name="endpoint" type="url" placeholder="https://abc.lambda-url.region.on.aws/">
-          </label>
-          <label>
-            Access key
-            <input id="accessKeyInput" name="accessKey" type="password" autocomplete="off" placeholder="backend access key">
-          </label>
-          <label>
-            Username
-            <input id="usernameInput" name="username" autocomplete="username" placeholder="username">
-          </label>
-          <label>
-            Password
-            <input id="passwordInput" name="password" type="password" autocomplete="current-password" placeholder="password">
-          </label>
-          <button type="submit">Fetch Logbook</button>
-        </form>
+        <div id="connectBody">
+          <div class="tabs" role="tablist" aria-label="Data source">
+            <button class="tab is-active" id="apiTab" type="button" role="tab" aria-selected="true" aria-controls="apiForm" data-tab="api">Live export</button>
+            <button class="tab" id="csvTab" type="button" role="tab" aria-selected="false" aria-controls="csvForm" data-tab="csv">Upload CSV</button>
+          </div>
 
-        <form class="source-grid is-hidden" id="csvForm" data-panel="csv">
-          <label>
-            BoardLib CSV
-            <input id="csvInput" name="csv" type="file" accept=".csv,text/csv">
-          </label>
-          <button type="submit">Load CSV</button>
-        </form>
+          <form class="source-form" id="apiForm" data-panel="api" role="tabpanel" aria-labelledby="apiTab">
+            <fieldset>
+              <legend>Tension account</legend>
+              <p class="field-help">Your Tension board login is sent to Tension for this request and never stored.</p>
+              <div class="credential-grid">
+                <label>
+                  Username
+                  <input id="usernameInput" name="username" autocomplete="username" placeholder="username">
+                </label>
+                <label>
+                  Password
+                  <span class="secret-field">
+                    <input id="passwordInput" name="password" type="password" autocomplete="current-password" placeholder="password">
+                    <button class="reveal-toggle" type="button" data-reveal-for="passwordInput" aria-label="Show or hide password">Show</button>
+                  </span>
+                </label>
+              </div>
+            </fieldset>
 
-        <p class="status" id="status">No logbook loaded.</p>
+            <div class="room-access">
+              <span>Room access: <strong id="keyStatus">not set</strong></span>
+              <button class="link-button" id="changeKeyButton" type="button">Change</button>
+            </div>
+
+            <details class="advanced">
+              <summary>Advanced: export endpoint</summary>
+              <label>
+                Lambda Function URL
+                <input id="endpointInput" name="endpoint" type="url" placeholder="https://abc.lambda-url.region.on.aws/">
+              </label>
+            </details>
+
+            <button class="primary-action" id="fetchButton" type="submit">
+              <span class="button-spinner" aria-hidden="true"></span>
+              <span data-button-label>Fetch Logbook</span>
+            </button>
+          </form>
+
+          <form class="source-form is-hidden" id="csvForm" data-panel="csv" role="tabpanel" aria-labelledby="csvTab">
+            <label class="drop-zone" id="csvDropZone">
+              <span class="drop-title">Drop a BoardLib CSV here</span>
+              <span class="drop-copy">or browse for a local export</span>
+              <input id="csvInput" name="csv" type="file" accept=".csv,text/csv">
+            </label>
+            <button class="primary-action" type="submit">Load CSV</button>
+          </form>
+        </div>
+
+        <div class="status-banner" id="status" role="status" aria-live="polite">
+          <span class="status-icon" aria-hidden="true"></span>
+          <span id="statusMessage">No logbook loaded.</span>
+        </div>
       </section>
 
       <section class="dashboard is-hidden" id="dashboard">
-        <div class="toolbar">
+        <div class="session-header">
           <button class="icon-button" id="prevDay" type="button" title="Previous session" aria-label="Previous session">&lt;</button>
-          <select id="sessionSelect" aria-label="Session date"></select>
+          <div class="session-title">
+            <p class="eyebrow">session</p>
+            <h2 id="sessionHeading">Session</h2>
+          </div>
           <button class="icon-button" id="nextDay" type="button" title="Next session" aria-label="Next session">&gt;</button>
+          <label class="jump-label">
+            Jump to date
+            <select id="sessionSelect" aria-label="Session date"></select>
+          </label>
         </div>
 
         <div class="stats" id="stats"></div>
 
         <section class="analysis">
-          <div>
+          <div class="chart-panel">
             <h2>Logged Grade Counts</h2>
             <div class="chart" id="gradeChart"></div>
           </div>
@@ -120,6 +183,25 @@
       </section>
     </section>
   </main>
+
+  <dialog class="key-dialog" id="keyDialog">
+    <form method="dialog" id="keyForm">
+      <h2>Board Room access key</h2>
+      <p class="field-help">This unlocks the private export endpoint. It is separate from your Tension account password.</p>
+      <label>
+        Access key
+        <span class="secret-field">
+          <input id="keyInput" name="boardRoomKey" type="password" autocomplete="off" placeholder="backend access key">
+          <button class="reveal-toggle" type="button" data-reveal-for="keyInput" aria-label="Show or hide access key">Show</button>
+        </span>
+      </label>
+      <menu>
+        <button class="ghost" id="cancelKeyButton" type="button">Cancel</button>
+        <button value="default" type="submit">Save key</button>
+      </menu>
+    </form>
+  </dialog>
+
   <script src="site.config.js"></script>
   <script src="app.js"></script>
 </body>
