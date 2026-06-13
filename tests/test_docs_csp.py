@@ -90,6 +90,16 @@ def test_localhost_dev_path_does_not_call_production():
     assert re.search(r"if\s*\(IS_LOCAL\)\s*return", js)
 
 
+def test_export_csv_neutralizes_formula_leading_cells():
+    # Export CSV must defuse formula-leading cells (=, +, -, @, tab, CR) so a
+    # board/user-authored string can't run as a formula when the download is
+    # opened in Excel/Sheets.
+    js = DOCS_APP.read_text(encoding="utf-8")
+
+    assert r"/^[=+\-@\t\r]/" in js
+    assert "'${text}" in js
+
+
 def test_sample_csv_has_sessions_for_no_backend_smoke_path():
     with SAMPLE_CSV.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
