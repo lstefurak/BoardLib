@@ -350,9 +350,20 @@ $("apiForm").addEventListener("submit", async (event) => {
   }
   const accessKey = $("accessKeyInput").value.trim();
   const submitButton = $("apiForm").querySelector('button[type="submit"]');
+  const submitLabel = submitButton && submitButton.querySelector(".btn-label");
   exportInFlight = true;
-  if (submitButton) submitButton.disabled = true;
-  setStatus("Requesting export...");
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.classList.add("is-busy");
+  }
+  if (submitLabel) submitLabel.textContent = "Loading";
+  // Tick a live elapsed counter so a slow board export still feels alive.
+  const startedAt = Date.now();
+  const ticker = setInterval(() => {
+    const seconds = Math.round((Date.now() - startedAt) / 1000);
+    setStatus(`Requesting export... ${seconds}s`);
+  }, 1000);
+  setStatus("Requesting export... 0s");
   try {
     const response = await callBackend(
       endpoint,
@@ -380,11 +391,16 @@ $("apiForm").addEventListener("submit", async (event) => {
   } catch (error) {
     setStatus(error.message, "error");
   } finally {
+    clearInterval(ticker);
     // Whatever happened, return the password field to dots (it may have been
     // revealed via "Show"); the typed value is preserved unless we cleared it.
     hideSecret($("passwordInput"));
     exportInFlight = false;
-    if (submitButton) submitButton.disabled = false;
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.classList.remove("is-busy");
+    }
+    if (submitLabel) submitLabel.textContent = "Fetch Logs";
   }
 });
 
