@@ -1,4 +1,8 @@
 const config = window.BOARDLOG_CONFIG || {};
+// Local dev overrides (gitignored docs/site.config.local.js, generated from
+// .env by scripts/serve_local.py). Absent in production.
+const local = window.BOARDLOG_LOCAL || {};
+const IS_LOCAL = ["localhost", "127.0.0.1", "[::1]", ""].includes(location.hostname);
 const state = {
   gate: "",
   rows: [],
@@ -16,7 +20,13 @@ function setStatus(message, tone = "muted") {
 }
 
 function currentEndpoint() {
-  return ($("endpointInput").value || config.defaultEndpoint || "").trim();
+  const typed = $("endpointInput").value.trim();
+  if (typed) return typed;
+  // On localhost, don't silently fall back to the production Function URL — a
+  // cross-origin call to it just CORS-fails. Use a local override only if one
+  // was supplied; otherwise run backend-free (gate opens, CSV still works).
+  if (IS_LOCAL) return (local.endpoint || "").trim();
+  return (config.defaultEndpoint || "").trim();
 }
 
 // The Function URL is public; the gate phrase and access key are sent as
@@ -35,9 +45,18 @@ async function verifyGate(phrase) {
   const endpoint = currentEndpoint();
   // CSV-only use has no backend and nothing to protect, so open the door locally.
   if (!endpoint) return;
-  const response = await callBackend(endpoint, { action: "unlock" }, { "X-Board-Gate": phrase });
-  if (response.status === 403) throw new Error("The door stays shut.");
-  if (!response.ok) throw new Error(`Gate check failed (HTTP ${response.status}).`);
+  try {
+    const response = await callBackend(endpoint, { action: "unlock" }, { "X-Board-Gate": phrase });
+    if (response.status === 403) throw new Error("The door stays shut.");
+    if (!response.ok) throw new Error(`Gate check failed (HTTP ${response.status}).`);
+  } catch (error) {
+    // From localhost the Function URL is cross-origin and the browser blocks the
+    // response (CORS) — fetch rejects with a TypeError before we see a status.
+    // That is expected in local dev, so open the door instead of trapping the
+    // tester at the gate. A genuine 403 (handled above) still throws in prod.
+    if (IS_LOCAL && error instanceof TypeError) return;
+    throw error;
+  }
 }
 
 async function unlock(phrase) {
@@ -304,16 +323,6 @@ $("knockForm").addEventListener("submit", async (event) => {
 
 $("lockButton").addEventListener("click", lock);
 
-document.querySelectorAll(".tab").forEach((tab) => {
-  tab.addEventListener("click", () => {
-    document.querySelectorAll(".tab").forEach((item) => item.classList.remove("is-active"));
-    tab.classList.add("is-active");
-    document.querySelectorAll("[data-panel]").forEach((panel) => {
-      panel.classList.toggle("is-hidden", panel.dataset.panel !== tab.dataset.tab);
-    });
-  });
-});
-
 let exportInFlight = false;
 
 $("apiForm").addEventListener("submit", async (event) => {
@@ -398,13 +407,27 @@ $("copyLog").addEventListener("click", async () => {
   }, 1200);
 });
 
-if (config.defaultEndpoint) {
-  $("endpointInput").value = config.defaultEndpoint;
+// Prefill the endpoint: a local override on localhost, the shipped default in
+// production. Leaving it blank locally keeps the page from calling production.
+const prefillEndpoint = IS_LOCAL ? local.endpoint : config.defaultEndpoint;
+if (prefillEndpoint) {
+  $("endpointInput").value = prefillEndpoint;
+}
+
+// Local dev convenience: prefill the gate phrase from .env so you only press
+// Enter to get past the (unchanged) gate page.
+if (IS_LOCAL && local.knock && !sessionStorage.getItem("boardlog:gate")) {
+  $("knockInput").value = local.knock;
 }
 
 const storedKey = sessionStorage.getItem("boardlog:key");
 if (storedKey) {
   $("accessKeyInput").value = storedKey;
+} else {
+  // First visit (no remembered key): open Room Access so the endpoint and key
+  // fields are visible. Once a key sticks, this stays collapsed and the user
+  // just types username/password.
+  $("roomAccess").open = true;
 }
 
 const storedGate = sessionStorage.getItem("boardlog:gate");

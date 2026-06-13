@@ -352,3 +352,206 @@ th {
   margin-top: 0;
   align-self: center;
 }
+
+/* ----------------------------------------------------------------------------
+   App page: sign-in / connect card
+   Username + password lead; the Function URL and access key live in a
+   collapsible "Room access" panel that stays out of the way once remembered.
+---------------------------------------------------------------------------- */
+.connect {
+  display: flex;
+  justify-content: center;
+  margin-top: 40px;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 28px;
+  box-shadow: 0 1px 2px rgba(23, 33, 31, .05), 0 24px 48px -32px rgba(23, 33, 31, .4);
+}
+
+.auth-form {
+  display: grid;
+  gap: 16px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.field > label {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.field input {
+  min-height: 46px;
+}
+
+.field input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, .16);
+}
+
+/* Reveal button sits inline to the right of a password field. */
+.field.has-reveal {
+  grid-template-columns: 1fr auto;
+  gap: 6px 8px;
+  align-items: end;
+}
+
+.field.has-reveal > label {
+  grid-column: 1 / -1;
+}
+
+.field.has-reveal > input {
+  grid-column: 1;
+}
+
+.field.has-reveal > .reveal-toggle {
+  grid-column: 2;
+  margin: 0;
+  min-height: 46px;
+  align-self: end;
+  border-radius: 10px;
+}
+
+/* Disclosure panels (Room access + CSV fallback). */
+.room-access > summary,
+.csv-fallback > summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.room-access > summary::-webkit-details-marker,
+.csv-fallback > summary::-webkit-details-marker {
+  display: none;
+}
+
+.room-access {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--soft);
+}
+
+.room-access > summary {
+  padding: 13px 16px;
+}
+
+.summary-text {
+  display: grid;
+  gap: 2px;
+}
+
+.summary-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.summary-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.room-access-body {
+  display: grid;
+  gap: 14px;
+  padding: 4px 16px 16px;
+}
+
+/* CSS chevron, sized small so it never overpowers the label. */
+.chev {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  margin-right: 2px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(45deg);
+  transition: transform .18s ease;
+}
+
+details[open] > summary .chev {
+  transform: rotate(-135deg);
+}
+
+/* Primary call to action. */
+button.primary {
+  width: 100%;
+  min-height: 48px;
+  border: none;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+button.primary:hover {
+  filter: brightness(1.06);
+}
+
+button.primary:disabled {
+  opacity: .55;
+  filter: none;
+  cursor: default;
+}
+
+/* "Load a CSV instead" fallback. */
+.csv-fallback {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.csv-fallback > summary {
+  font-size: 13px;
+}
+
+.csv-fallback > summary .summary-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.csv-fallback[open] > summary {
+  margin-bottom: 14px;
+}
+
+.csv-form {
+  display: grid;
+  gap: 12px;
+}
+
+.csv-form button {
+  width: 100%;
+}
+
+.auth-card .status {
+  margin-top: 16px;
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .connect {
+    margin-top: 24px;
+  }
+
+  .auth-card {
+    padding: 22px;
+  }
+}

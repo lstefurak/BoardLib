@@ -34,46 +34,62 @@
         <div>
           <p class="eyebrow">board log</p>
           <h1>Session Visualizer</h1>
-          <p class="lede">Load a BoardLib CSV or ask a private export endpoint for one.</p>
+          <p class="lede">Sign in to pull your logbook straight from the board.</p>
         </div>
         <button class="ghost" id="lockButton">Lock</button>
       </header>
 
-      <section class="panel">
-        <div class="tabs" role="tablist" aria-label="Data source">
-          <button class="tab is-active" type="button" data-tab="api">Connect</button>
-          <button class="tab" type="button" data-tab="csv">CSV</button>
+      <section class="connect">
+        <div class="auth-card">
+          <form class="auth-form" id="apiForm">
+            <div class="field">
+              <label for="usernameInput">Username</label>
+              <input id="usernameInput" name="username" autocomplete="username" placeholder="board account username">
+            </div>
+            <div class="field has-reveal">
+              <label for="passwordInput">Password</label>
+              <input id="passwordInput" name="password" type="password" autocomplete="current-password" placeholder="board account password">
+            </div>
+
+            <details class="room-access" id="roomAccess">
+              <summary>
+                <span class="summary-text">
+                  <span class="summary-label">Room access</span>
+                  <span class="summary-hint">Function URL &amp; access key</span>
+                </span>
+                <span class="chev" aria-hidden="true"></span>
+              </summary>
+              <div class="room-access-body">
+                <div class="field">
+                  <label for="endpointInput">Function URL</label>
+                  <input id="endpointInput" name="endpoint" type="url" placeholder="https://abc.lambda-url.region.on.aws/">
+                </div>
+                <div class="field has-reveal">
+                  <label for="accessKeyInput">Access key</label>
+                  <input id="accessKeyInput" name="accessKey" type="password" autocomplete="off" placeholder="backend access key">
+                </div>
+              </div>
+            </details>
+
+            <button class="primary" type="submit">Enter the room</button>
+          </form>
+
+          <details class="csv-fallback">
+            <summary>
+              <span class="summary-label">Load a CSV file instead</span>
+              <span class="chev" aria-hidden="true"></span>
+            </summary>
+            <form class="csv-form" id="csvForm">
+              <div class="field">
+                <label for="csvInput">BoardLib CSV</label>
+                <input id="csvInput" name="csv" type="file" accept=".csv,text/csv">
+              </div>
+              <button class="ghost" type="submit">Load CSV</button>
+            </form>
+          </details>
+
+          <p class="status" id="status">No logbook loaded.</p>
         </div>
-
-        <form class="source-grid" id="apiForm" data-panel="api">
-          <label>
-            Lambda Function URL
-            <input id="endpointInput" name="endpoint" type="url" placeholder="https://abc.lambda-url.region.on.aws/">
-          </label>
-          <label>
-            Access key
-            <input id="accessKeyInput" name="accessKey" type="password" autocomplete="off" placeholder="backend access key">
-          </label>
-          <label>
-            Username
-            <input id="usernameInput" name="username" autocomplete="username" placeholder="username">
-          </label>
-          <label>
-            Password
-            <input id="passwordInput" name="password" type="password" autocomplete="current-password" placeholder="password">
-          </label>
-          <button type="submit">Fetch Logbook</button>
-        </form>
-
-        <form class="source-grid is-hidden" id="csvForm" data-panel="csv">
-          <label>
-            BoardLib CSV
-            <input id="csvInput" name="csv" type="file" accept=".csv,text/csv">
-          </label>
-          <button type="submit">Load CSV</button>
-        </form>
-
-        <p class="status" id="status">No logbook loaded.</p>
       </section>
 
       <section class="dashboard is-hidden" id="dashboard">
@@ -121,6 +137,10 @@
     </section>
   </main>
   <script src="site.config.js"></script>
+  <!-- Optional local-dev overrides (gate phrase, endpoint). Gitignored and
+       generated from .env by scripts/serve_local.py; absent (404, harmless) in
+       production. -->
+  <script src="site.config.local.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
