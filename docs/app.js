@@ -73,6 +73,9 @@ function lock() {
   sessionStorage.removeItem("boardlog:key");
   $("app").classList.add("is-hidden");
   $("gate").classList.remove("is-hidden");
+  // Reset the app layout so the next unlock starts at the fetch form.
+  $("connect").classList.remove("is-hidden");
+  $("dashboard").classList.add("is-hidden");
   $("knockInput").value = "";
   // Clear the secrets from the DOM too, or they stay one "Show" click away,
   // and return any revealed field to dots.
@@ -195,7 +198,8 @@ function summarize(rows) {
 }
 
 function loadCsvText(text, sourceLabel) {
-  loadRows(normalizeRows(parseCsv(text)), sourceLabel);
+  const rawRows = parseCsv(text);
+  loadRows(normalizeRows(rawRows), sourceLabel, rawRows);
 }
 
 function loadJsonPayload(payload, sourceLabel) {
@@ -203,10 +207,10 @@ function loadJsonPayload(payload, sourceLabel) {
   if (!Array.isArray(rows)) {
     throw new Error("Export response did not include a rows array.");
   }
-  loadRows(normalizeRows(rows), sourceLabel);
+  loadRows(normalizeRows(rows), sourceLabel, rows);
 }
 
-function loadRows(rows, sourceLabel) {
+function loadRows(rows, sourceLabel, rawRows) {
   // Validate before touching state, so a failed load leaves the previously
   // rendered dashboard fully working instead of pointing at empty sessions.
   const summary = summarize(rows);
@@ -214,13 +218,58 @@ function loadRows(rows, sourceLabel) {
     throw new Error("No sessions found in that CSV.");
   }
   state.rows = rows;
+  // Keep the source rows verbatim so Export CSV round-trips faithfully.
+  state.rawRows = rawRows || rows;
   state.sessions = summary.sessions;
   state.gradeOrder = summary.gradeOrder;
   state.selectedIndex = state.sessions.length - 1;
-  $("dashboard").classList.remove("is-hidden");
-  setStatus(`Loaded ${state.rows.length} rows from ${sourceLabel}.`, "good");
   renderSessionOptions();
   render();
+
+  // Data is in: focus the dashboard and tuck the fetch form away. The header's
+  // "Load different data" brings it back.
+  $("sourceLabel").textContent = `Loaded ${state.rows.length} rows from ${sourceLabel}.`;
+  $("dashboard").classList.remove("is-hidden");
+  $("connect").classList.add("is-hidden");
+  setStatus(`Loaded ${state.rows.length} rows from ${sourceLabel}.`, "good");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function csvCell(value) {
+  if (value === null || value === undefined) return "";
+  // Source rows from the API carry real booleans; BoardLib CSVs use True/False.
+  const text = typeof value === "boolean" ? (value ? "True" : "False") : String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+// Re-serialize the verbatim source rows so the export round-trips to a real
+// BoardLib CSV (including columns the dashboard itself doesn't use).
+function rowsToCsv(rows) {
+  const headers = [];
+  const seen = new Set();
+  rows.forEach((row) => Object.keys(row).forEach((key) => {
+    if (!seen.has(key)) {
+      seen.add(key);
+      headers.push(key);
+    }
+  }));
+  const lines = [headers.map(csvCell).join(",")];
+  rows.forEach((row) => lines.push(headers.map((key) => csvCell(row[key])).join(",")));
+  return lines.join("\r\n");
+}
+
+function exportCsv() {
+  if (!state.rawRows || !state.rawRows.length) return;
+  const board = (state.rows[0] && state.rows[0].board) || "boardlog";
+  const blob = new Blob([rowsToCsv(state.rawRows)], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${board}-logbook.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function formatDate(value) {
@@ -350,9 +399,20 @@ $("apiForm").addEventListener("submit", async (event) => {
   }
   const accessKey = $("accessKeyInput").value.trim();
   const submitButton = $("apiForm").querySelector('button[type="submit"]');
+  const submitLabel = submitButton && submitButton.querySelector(".btn-label");
   exportInFlight = true;
-  if (submitButton) submitButton.disabled = true;
-  setStatus("Requesting export...");
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.classList.add("is-busy");
+  }
+  if (submitLabel) submitLabel.textContent = "Loading";
+  // Tick a live elapsed counter so a slow board export still feels alive.
+  const startedAt = Date.now();
+  const ticker = setInterval(() => {
+    const seconds = Math.round((Date.now() - startedAt) / 1000);
+    setStatus(`Requesting export... ${seconds}s`);
+  }, 1000);
+  setStatus("Requesting export... 0s");
   try {
     const response = await callBackend(
       endpoint,
@@ -373,18 +433,23 @@ $("apiForm").addEventListener("submit", async (event) => {
     // Only remember the key once the backend has accepted it.
     sessionStorage.setItem("boardlog:key", accessKey);
     const payload = await response.json();
-    loadJsonPayload(payload, "private export endpoint");
+    loadJsonPayload(payload, "remote storage");
     // Clear the password only after a successful load. On failure, keep it so
     // the user can retry without retyping.
     $("passwordInput").value = "";
   } catch (error) {
     setStatus(error.message, "error");
   } finally {
+    clearInterval(ticker);
     // Whatever happened, return the password field to dots (it may have been
     // revealed via "Show"); the typed value is preserved unless we cleared it.
     hideSecret($("passwordInput"));
     exportInFlight = false;
-    if (submitButton) submitButton.disabled = false;
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.classList.remove("is-busy");
+    }
+    if (submitLabel) submitLabel.textContent = "Fetch Logs";
   }
 });
 
@@ -423,6 +488,13 @@ $("nextDay").addEventListener("click", () => {
   render();
 });
 
+$("exportCsvButton").addEventListener("click", exportCsv);
+
+$("loadDifferentButton").addEventListener("click", () => {
+  $("connect").classList.remove("is-hidden");
+  $("connect").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
 $("copyLog").addEventListener("click", async () => {
   await navigator.clipboard.writeText($("workoutLog").textContent);
   $("copyLog").textContent = "Copied";
@@ -438,9 +510,13 @@ if (prefillEndpoint) {
   $("endpointInput").value = prefillEndpoint;
 }
 
-// Local dev convenience: prefill the gate phrase from .env so you only press
-// Enter to get past the (unchanged) gate page.
-if (IS_LOCAL && local.knock && !sessionStorage.getItem("boardlog:gate")) {
+// Prefill the gate phrase (a cached one from this tab, or the .env knock in
+// local dev) so a returning visitor only presses Enter. We deliberately do NOT
+// auto-unlock below: entering the room is always an explicit action.
+const cachedGate = sessionStorage.getItem("boardlog:gate");
+if (cachedGate) {
+  $("knockInput").value = cachedGate;
+} else if (IS_LOCAL && local.knock) {
   $("knockInput").value = local.knock;
 }
 
@@ -452,11 +528,6 @@ if (storedKey) {
   // fields are visible. Once a key sticks, this stays collapsed and the user
   // just types username/password.
   $("roomAccess").open = true;
-}
-
-const storedGate = sessionStorage.getItem("boardlog:gate");
-if (storedGate) {
-  unlock(storedGate).catch(() => lock());
 }
 
 // Add a show/hide toggle to every password field.

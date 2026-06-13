@@ -39,7 +39,7 @@
         <button class="ghost" id="lockButton">Lock</button>
       </header>
 
-      <section class="connect">
+      <section class="connect" id="connect">
         <div class="auth-card">
           <form class="auth-form" id="apiForm">
             <div class="field">
@@ -71,7 +71,10 @@
               </div>
             </details>
 
-            <button class="primary" type="submit">Fetch Logs</button>
+            <button class="primary" type="submit">
+              <span class="btn-spinner" aria-hidden="true"></span>
+              <span class="btn-label">Fetch Logs</span>
+            </button>
           </form>
 
           <details class="csv-fallback">
@@ -93,6 +96,14 @@
       </section>
 
       <section class="dashboard is-hidden" id="dashboard">
+        <div class="source-bar">
+          <span class="source-label" id="sourceLabel"></span>
+          <div class="source-actions">
+            <button class="ghost" id="exportCsvButton" type="button">Export CSV</button>
+            <button class="text-button" id="loadDifferentButton" type="button">Load different data</button>
+          </div>
+        </div>
+
         <div class="toolbar">
           <button class="icon-button" id="prevDay" type="button" title="Previous session" aria-label="Previous session">&lt;</button>
           <select id="sessionSelect" aria-label="Session date"></select>
