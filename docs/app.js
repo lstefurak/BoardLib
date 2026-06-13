@@ -510,9 +510,13 @@ if (prefillEndpoint) {
   $("endpointInput").value = prefillEndpoint;
 }
 
-// Local dev convenience: prefill the gate phrase from .env so you only press
-// Enter to get past the (unchanged) gate page.
-if (IS_LOCAL && local.knock && !sessionStorage.getItem("boardlog:gate")) {
+// Prefill the gate phrase (a cached one from this tab, or the .env knock in
+// local dev) so a returning visitor only presses Enter. We deliberately do NOT
+// auto-unlock below: entering the room is always an explicit action.
+const cachedGate = sessionStorage.getItem("boardlog:gate");
+if (cachedGate) {
+  $("knockInput").value = cachedGate;
+} else if (IS_LOCAL && local.knock) {
   $("knockInput").value = local.knock;
 }
 
@@ -524,11 +528,6 @@ if (storedKey) {
   // fields are visible. Once a key sticks, this stays collapsed and the user
   // just types username/password.
   $("roomAccess").open = true;
-}
-
-const storedGate = sessionStorage.getItem("boardlog:gate");
-if (storedGate) {
-  unlock(storedGate).catch(() => lock());
 }
 
 // Add a show/hide toggle to every password field.
