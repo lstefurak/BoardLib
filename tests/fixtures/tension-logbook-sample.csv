@@ -1,0 +1,3 @@
+board,angle,climb_name,date,logged_grade,displayed_grade,is_benchmark,tries,is_mirror,sessions_count,tries_total,is_repeat,is_ascent,comment
+tension,45,Captain Progression,2019-02-03 15:25:02,6c/V5,6c/V5,True,1,False,1,1,False,False,
+tension,45,Captain Progression,2019-02-03 15:26:07,6c/V5,6c/V5,True,1,True,1,1,False,True,

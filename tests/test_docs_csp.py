@@ -1,7 +1,14 @@
+import csv
+import re
+from collections import defaultdict
 from pathlib import Path
+
+from bs4 import BeautifulSoup
 
 
 DOCS_INDEX = Path(__file__).resolve().parents[1] / "docs" / "index.html"
+DOCS_APP = Path(__file__).resolve().parents[1] / "docs" / "app.js"
+SAMPLE_CSV = Path(__file__).resolve().parent / "fixtures" / "tension-logbook-sample.csv"
 
 
 def test_csp_allows_lambda_function_urls_in_any_region():
@@ -16,3 +23,82 @@ def test_endpoint_placeholder_is_region_neutral():
 
     assert "https://abc.lambda-url.region.on.aws/" in html
     assert "placeholder=\"https://abc.lambda-url.us-east-1.on.aws/\"" not in html
+
+
+def test_docs_keep_csp_safe_script_surface():
+    html = DOCS_INDEX.read_text(encoding="utf-8")
+    soup = BeautifulSoup(html, "html.parser")
+
+    # Every script is a same-origin relative file (CSP script-src 'self'); no
+    # remote or inline scripts. site.config.local.js is an optional local-dev
+    # override that 404s harmlessly in production.
+    scripts = soup.find_all("script")
+    assert [script.get("src") for script in scripts] == [
+        "site.config.js",
+        "site.config.local.js",
+        "app.js",
+    ]
+    assert all(not (script.string or "").strip() for script in scripts)
+    assert "http://" not in html
+
+
+def test_docs_have_no_inline_event_handlers():
+    # Inline on*= handlers would require 'unsafe-inline' in script-src; the CSP
+    # forbids them, so none may sneak into the markup.
+    html = DOCS_INDEX.read_text(encoding="utf-8")
+    soup = BeautifulSoup(html, "html.parser")
+
+    for tag in soup.find_all(True):
+        assert not [attr for attr in tag.attrs if attr.lower().startswith("on")]
+
+
+def test_credential_form_leads_with_username_and_password():
+    html = DOCS_INDEX.read_text(encoding="utf-8")
+    soup = BeautifulSoup(html, "html.parser")
+    api_form = soup.find("form", id="apiForm")
+    assert api_form is not None
+
+    inputs = {input_tag.get("id"): input_tag for input_tag in api_form.find_all("input")}
+    # Username and password lead; the Function URL and access key live in the
+    # collapsible Room Access panel within the same card.
+    assert set(inputs) == {"usernameInput", "passwordInput", "endpointInput", "accessKeyInput"}
+    assert inputs["usernameInput"].get("autocomplete") == "username"
+    assert inputs["passwordInput"].get("autocomplete") == "current-password"
+    # The access key is not a board credential, so keep it out of autofill.
+    assert inputs["accessKeyInput"].get("autocomplete") == "off"
+
+
+def test_room_access_is_collapsed_by_default():
+    html = DOCS_INDEX.read_text(encoding="utf-8")
+    soup = BeautifulSoup(html, "html.parser")
+
+    room_access = soup.find("details", id="roomAccess")
+    assert room_access is not None
+    # Collapsed in markup; app.js opens it only on first visit (no saved key).
+    assert not room_access.has_attr("open")
+    body = room_access.find_all("input")
+    assert {tag.get("id") for tag in body} == {"endpointInput", "accessKeyInput"}
+
+
+def test_localhost_dev_path_does_not_call_production():
+    # On localhost the page must not fall back to the shipped Function URL, and
+    # a cross-origin CORS failure at the gate must open the door rather than
+    # trap the tester (see scripts/serve_local.py).
+    js = DOCS_APP.read_text(encoding="utf-8")
+
+    assert "IS_LOCAL" in js
+    assert re.search(r"if\s*\(IS_LOCAL\)\s*return", js)
+
+
+def test_sample_csv_has_sessions_for_no_backend_smoke_path():
+    with SAMPLE_CSV.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+
+    sessions = defaultdict(list)
+    for row in rows:
+        if row.get("date") and row.get("climb_name"):
+            sessions[row["date"][:10]].append(row)
+
+    assert rows
+    assert sessions
+    assert any(row.get("is_ascent", "").lower() == "true" for row in rows)
