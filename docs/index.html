@@ -104,46 +104,98 @@
           </div>
         </div>
 
-        <div class="toolbar">
-          <button class="icon-button" id="prevDay" type="button" title="Previous session" aria-label="Previous session">&lt;</button>
-          <select id="sessionSelect" aria-label="Session date"></select>
-          <button class="icon-button" id="nextDay" type="button" title="Next session" aria-label="Next session">&gt;</button>
+        <div class="tabs view-tabs" role="tablist" aria-label="Dashboard view">
+          <button class="tab is-active" id="viewSessionsTab" type="button" role="tab" aria-selected="true" aria-controls="sessionsView">Sessions</button>
+          <button class="tab" id="viewClimbsTab" type="button" role="tab" aria-selected="false" aria-controls="climbsView">Climbs</button>
         </div>
 
-        <div class="stats" id="stats"></div>
-
-        <section class="analysis">
-          <div>
-            <h2>Logged Grade Counts</h2>
-            <div class="chart" id="gradeChart"></div>
+        <div id="sessionsView" role="tabpanel" aria-labelledby="viewSessionsTab">
+          <div class="toolbar">
+            <button class="icon-button" id="prevDay" type="button" title="Previous session" aria-label="Previous session">&lt;</button>
+            <select id="sessionSelect" aria-label="Session date"></select>
+            <button class="icon-button" id="nextDay" type="button" title="Next session" aria-label="Next session">&gt;</button>
           </div>
-          <div class="log-panel">
-            <div class="log-toolbar">
-              <h2>Workout Log</h2>
-              <button class="ghost" id="copyLog" type="button">Copy</button>
+
+          <div class="stats" id="stats"></div>
+
+          <section class="analysis">
+            <div>
+              <h2>Logged Grade Counts</h2>
+              <div class="chart" id="gradeChart"></div>
             </div>
-            <pre id="workoutLog"></pre>
-          </div>
-        </section>
+            <div class="log-panel">
+              <div class="log-toolbar">
+                <h2>Workout Log</h2>
+                <button class="ghost" id="copyLog" type="button">Copy</button>
+              </div>
+              <pre id="workoutLog"></pre>
+            </div>
+          </section>
 
-        <section>
-          <h2>Climbs</h2>
-          <div class="table-wrap">
-            <table>
+          <section>
+            <h2>Climbs</h2>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Climb</th>
+                    <th>Grade</th>
+                    <th>Angle</th>
+                    <th>Tries</th>
+                    <th>Type</th>
+                  </tr>
+                </thead>
+                <tbody id="climbRows"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <div id="climbsView" class="is-hidden" role="tabpanel" aria-labelledby="viewClimbsTab">
+          <div class="stats" id="climbStats"></div>
+
+          <div class="climb-controls">
+            <input id="climbSearch" type="search" placeholder="Search climbs" aria-label="Search climbs">
+            <div class="chips" id="climbFilters" role="group" aria-label="Filter climbs">
+              <button class="chip is-active" type="button" data-filter="all">All</button>
+              <button class="chip" type="button" data-filter="sent">Sent</button>
+              <button class="chip" type="button" data-filter="project">Projects</button>
+              <button class="chip" type="button" data-filter="repeated">Repeated</button>
+              <button class="chip" type="button" data-filter="flashed">Flashed</button>
+              <button class="chip" type="button" data-filter="benchmark">Benchmarks</button>
+            </div>
+            <select id="climbSort" aria-label="Sort climbs">
+              <option value="recent">Last climbed</option>
+              <option value="grade">Grade</option>
+              <option value="tries">Most tries</option>
+              <option value="sends">Most sends</option>
+              <option value="name">Name</option>
+              <option value="angle">Angle</option>
+            </select>
+          </div>
+
+          <p class="hint climb-count" id="climbCount"></p>
+
+          <div class="table-wrap climb-history">
+            <table id="climbHistoryTable">
               <thead>
                 <tr>
-                  <th>Time</th>
                   <th>Climb</th>
                   <th>Grade</th>
                   <th>Angle</th>
+                  <th>Sends</th>
                   <th>Tries</th>
-                  <th>Type</th>
+                  <th>Sessions</th>
+                  <th>First send</th>
+                  <th>Last climbed</th>
+                  <th>Community</th>
                 </tr>
               </thead>
-              <tbody id="climbRows"></tbody>
+              <tbody id="climbHistoryRows"></tbody>
             </table>
           </div>
-        </section>
+        </div>
       </section>
     </section>
   </main>

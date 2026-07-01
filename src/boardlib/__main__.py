@@ -25,6 +25,9 @@ LOGBOOK_FIELDS = (
     "is_repeat",
     "is_ascent",
     "comment",
+    "climb_uuid",
+    "ascensionist_count",
+    "quality_average",
 )
 
 

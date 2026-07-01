@@ -689,3 +689,162 @@ button.primary.is-busy .btn-spinner {
     padding: 22px;
   }
 }
+
+/* ----------------------------------------------------------------------------
+   Climbs view: per-climb send history (search, filter chips, expandable rows)
+---------------------------------------------------------------------------- */
+.view-tabs {
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 14px;
+}
+
+#sessionsView,
+#climbsView {
+  display: grid;
+  gap: 22px;
+}
+
+.climb-controls {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.climb-controls select {
+  width: auto;
+  min-width: 150px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: white;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.chip.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.climb-count {
+  margin-top: -10px;
+}
+
+.climb-history {
+  max-height: 560px;
+}
+
+.climb-history th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.climb-row {
+  cursor: pointer;
+}
+
+.climb-row:hover td {
+  background: var(--soft);
+}
+
+.climb-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.climb-name {
+  font-weight: 600;
+}
+
+.badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge-project {
+  background: #eef1f0;
+  color: var(--muted);
+}
+
+.badge-flash {
+  background: var(--soft);
+  color: var(--accent);
+}
+
+.badge-repeat {
+  background: #eaf1fb;
+  color: #1d4ed8;
+}
+
+.badge-benchmark {
+  background: #fdf3e7;
+  color: var(--accent-2);
+}
+
+.tries-total {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Loaded data may predate the community-stats columns; app.js adds
+   .no-community to hide the (last) column instead of a dash-filled one. */
+.no-community th:nth-child(9),
+.no-community td:nth-child(9) {
+  display: none;
+}
+
+.climb-detail > td {
+  background: var(--paper);
+  padding: 10px 14px 14px;
+}
+
+.attempt-line {
+  display: grid;
+  grid-template-columns: 170px 64px 64px 82px 1fr;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.attempt-kind.is-send {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.attempt-comment {
+  color: var(--ink);
+}
+
+@media (max-width: 900px) {
+  .climb-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .climb-controls select {
+    width: 100%;
+  }
+
+  .attempt-line {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

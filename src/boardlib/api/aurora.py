@@ -406,14 +406,12 @@ def process_raw_ascent_entries(raw_ascents_entries, board, db_path):
     climb_names = boardlib.db.aurora.get_climb_name_mapping(
         db_path, [entry["climb_uuid"] for entry in listed_entries]
     )
-    difficulty_stats = boardlib.db.aurora.get_difficulty_stats_mapping(
+    climb_stats = boardlib.db.aurora.get_climb_stats_mapping(
         db_path, [entry["climb_uuid"] for entry in listed_entries]
     )
     for raw_entry in listed_entries:
         climb_name = climb_names.get(raw_entry["climb_uuid"])
-        difficulty, benchmark_difficulty = difficulty_stats.get(
-            (raw_entry["climb_uuid"], raw_entry["angle"]), (None, None)
-        )
+        stats = climb_stats.get((raw_entry["climb_uuid"], raw_entry["angle"]), {})
 
         ascents_entries.append(
             {
@@ -427,8 +425,10 @@ def process_raw_ascent_entries(raw_ascents_entries, board, db_path):
                 "logged_grade": difficulty_to_grade(
                     difficulty_mapping, raw_entry["difficulty"]
                 ),
-                "displayed_grade": difficulty_to_grade(difficulty_mapping, difficulty),
-                "is_benchmark": bool(benchmark_difficulty),
+                "displayed_grade": difficulty_to_grade(
+                    difficulty_mapping, stats.get("display_difficulty")
+                ),
+                "is_benchmark": bool(stats.get("benchmark_difficulty")),
                 "tries": (
                     raw_entry["attempt_id"]
                     if raw_entry["attempt_id"]
@@ -436,6 +436,8 @@ def process_raw_ascent_entries(raw_ascents_entries, board, db_path):
                 ),
                 "is_mirror": raw_entry["is_mirror"],
                 "comment": raw_entry["comment"],
+                "ascensionist_count": stats.get("ascensionist_count"),
+                "quality_average": stats.get("quality_average"),
             }
         )
     return ascents_entries
@@ -499,16 +501,16 @@ def combine_ascents_and_bids(ascents_df, bids_summary, db_path):
                 "is_mirror": ascent_row["is_mirror"],
                 "is_ascent": True,
                 "comment": ascent_row["comment"],
+                "ascensionist_count": ascent_row.get("ascensionist_count", None),
+                "quality_average": ascent_row.get("quality_average", None),
             }
         )
 
-    difficulty_stats = boardlib.db.aurora.get_difficulty_stats_mapping(
+    climb_stats = boardlib.db.aurora.get_climb_stats_mapping(
         db_path, [bid_row["climb_uuid"] for bid_row in leftover_bids.values()]
     )
     for bid_row in leftover_bids.values():
-        difficulty, benchmark_difficulty = difficulty_stats.get(
-            (bid_row["climb_uuid"], bid_row["angle"]), (None, None)
-        )
+        stats = climb_stats.get((bid_row["climb_uuid"], bid_row["angle"]), {})
 
         final_logbook.append(
             {
@@ -519,14 +521,18 @@ def combine_ascents_and_bids(ascents_df, bids_summary, db_path):
                 "climb_name": bid_row["climb_name"],
                 "date": bid_row["date"],
                 "logged_grade": None,
-                "displayed_grade": difficulty_to_grade(difficulty_mapping, difficulty),
-                "is_benchmark": bool(benchmark_difficulty),
+                "displayed_grade": difficulty_to_grade(
+                    difficulty_mapping, stats.get("display_difficulty")
+                ),
+                "is_benchmark": bool(stats.get("benchmark_difficulty")),
                 "tries": bid_row["tries"],
                 "is_mirror": bid_row["is_mirror"],
                 "is_ascent": False,
                 "comment": bid_row.get(
                     "comment", None
                 ),  # Use .get() to safely handle missing 'comment'
+                "ascensionist_count": stats.get("ascensionist_count"),
+                "quality_average": stats.get("quality_average"),
             }
         )
     return final_logbook
@@ -540,6 +546,7 @@ def logbook_entries(board, token, db_path):
     if not bids_entries and not raw_ascents_entries:
         return pd.DataFrame(
             columns=[
+                "climb_angle_uuid",
                 "climb_uuid",
                 "board",
                 "angle",
@@ -552,6 +559,8 @@ def logbook_entries(board, token, db_path):
                 "is_mirror",
                 "is_ascent",
                 "comment",
+                "ascensionist_count",
+                "quality_average",
             ]
         )
 
@@ -591,6 +600,8 @@ def logbook_entries(board, token, db_path):
                 "tries",
                 "is_mirror",
                 "comment",
+                "ascensionist_count",
+                "quality_average",
             ]
         )
 
@@ -600,6 +611,7 @@ def logbook_entries(board, token, db_path):
         final_logbook,
         columns=[
             "climb_angle_uuid",
+            "climb_uuid",
             "board",
             "angle",
             "climb_name",
@@ -611,6 +623,8 @@ def logbook_entries(board, token, db_path):
             "is_mirror",
             "is_ascent",
             "comment",
+            "ascensionist_count",
+            "quality_average",
         ],
     )
     full_logbook_df["date"] = pd.to_datetime(full_logbook_df["date"])

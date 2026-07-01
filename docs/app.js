@@ -9,6 +9,11 @@ const state = {
   sessions: [],
   gradeOrder: [],
   selectedIndex: 0,
+  climbs: [],
+  view: "sessions",
+  climbFilter: "all",
+  climbQuery: "",
+  climbSort: "recent",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -130,6 +135,13 @@ function parseIntSafe(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+// Optional numeric columns (community stats) may be absent in older CSVs, so
+// missing/unparseable values become null rather than 0.
+function parseNumOrNull(value) {
+  const parsed = Number.parseFloat(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function cleanText(value) {
   const text = String(value || "").trim();
   return text.toLowerCase() === "nan" ? "" : text;
@@ -156,6 +168,8 @@ function normalizeRows(rawRows) {
       is_repeat: parseBool(row.is_repeat),
       is_ascent: parseBool(row.is_ascent),
       comment: cleanText(row.comment),
+      ascensionist_count: parseNumOrNull(row.ascensionist_count),
+      quality_average: parseNumOrNull(row.quality_average),
     };
   }).filter((row) => row && row.climb_name);
 }
@@ -197,6 +211,53 @@ function summarize(rows) {
   return { sessions, gradeOrder };
 }
 
+// Per-climb send history. Groups by climb + mirror + angle — the same grouping
+// BoardLib itself uses for sessions_count/tries_total — so "the same climb at
+// a different angle" is a separate line, which is what board grades mean.
+function summarizeClimbs(rows) {
+  const byClimb = new Map();
+  rows.forEach((row) => {
+    const key = `${row.climb_name}|${row.is_mirror ? "m" : ""}|${row.angle}`;
+    if (!byClimb.has(key)) byClimb.set(key, []);
+    byClimb.get(key).push(row);
+  });
+
+  return [...byClimb.values()].map((entries) => {
+    entries.sort((a, b) => a.date.localeCompare(b.date));
+    const sends = entries.filter((entry) => entry.is_ascent);
+    let triesToFirstSend = 0;
+    let firstSend = null;
+    for (const entry of entries) {
+      triesToFirstSend += entry.tries;
+      if (entry.is_ascent) {
+        firstSend = entry;
+        break;
+      }
+    }
+    const latest = entries[entries.length - 1];
+    // Grade of record: the most recent send's grade, else the latest entry's.
+    const gradeSource = sends.length ? sends[sends.length - 1] : latest;
+    return {
+      name: entries[0].climb_name,
+      mirror: entries[0].is_mirror,
+      angle: entries[0].angle,
+      grade: gradeSource.logged_grade,
+      benchmark: entries.some((entry) => entry.is_benchmark),
+      sends: sends.length,
+      totalTries: entries.reduce((sum, entry) => sum + entry.tries, 0),
+      triesToFirstSend: firstSend ? triesToFirstSend : null,
+      sessions: new Set(entries.map((entry) => entry.session_date)).size,
+      firstSendDate: firstSend ? firstSend.session_date : null,
+      lastClimbed: latest.session_date,
+      flashed: entries[0].is_ascent && entries[0].tries === 1,
+      repeated: sends.length >= 2,
+      communitySends: latest.ascensionist_count,
+      quality: latest.quality_average,
+      entries,
+    };
+  });
+}
+
 function loadCsvText(text, sourceLabel) {
   const rawRows = parseCsv(text);
   loadRows(normalizeRows(rawRows), sourceLabel, rawRows);
@@ -223,8 +284,10 @@ function loadRows(rows, sourceLabel, rawRows) {
   state.sessions = summary.sessions;
   state.gradeOrder = summary.gradeOrder;
   state.selectedIndex = state.sessions.length - 1;
+  state.climbs = summarizeClimbs(rows);
   renderSessionOptions();
   render();
+  renderClimbs();
 
   // Data is in: focus the dashboard and tuck the fetch form away. The header's
   // "Load different data" brings it back.
@@ -369,6 +432,128 @@ function render() {
   )).join("");
 }
 
+function climbMatchesFilter(climb, filter) {
+  switch (filter) {
+    case "sent": return climb.sends > 0;
+    case "project": return climb.sends === 0;
+    case "repeated": return climb.repeated;
+    case "flashed": return climb.flashed;
+    case "benchmark": return climb.benchmark;
+    default: return true;
+  }
+}
+
+// gradeKey returns 999 for grades it can't parse; keep those at the bottom of
+// a hardest-first sort instead of letting them win it.
+function gradeRank(grade) {
+  const key = gradeKey(grade);
+  return key === 999 ? -1 : key;
+}
+
+const CLIMB_SORTERS = {
+  recent: (a, b) => b.lastClimbed.localeCompare(a.lastClimbed) || a.name.localeCompare(b.name),
+  grade: (a, b) => gradeRank(b.grade) - gradeRank(a.grade) || a.name.localeCompare(b.name),
+  tries: (a, b) => b.totalTries - a.totalTries || a.name.localeCompare(b.name),
+  sends: (a, b) => b.sends - a.sends || a.name.localeCompare(b.name),
+  name: (a, b) => a.name.localeCompare(b.name) || a.angle - b.angle,
+  angle: (a, b) => a.angle - b.angle || a.name.localeCompare(b.name),
+};
+
+function climbBadges(climb) {
+  const badges = [];
+  if (climb.sends === 0) badges.push('<span class="badge badge-project">project</span>');
+  if (climb.flashed) badges.push('<span class="badge badge-flash">flash</span>');
+  if (climb.repeated) badges.push('<span class="badge badge-repeat">repeated</span>');
+  if (climb.benchmark) badges.push('<span class="badge badge-benchmark">benchmark</span>');
+  return badges.join("");
+}
+
+function climbDetailHtml(climb) {
+  return climb.entries.map((entry) => `
+    <div class="attempt-line">
+      <span class="attempt-date">${formatDate(entry.session_date)}</span>
+      <span class="attempt-kind ${entry.is_ascent ? "is-send" : ""}">${entry.is_ascent ? "send" : "attempt"}</span>
+      <span class="attempt-tries">${entry.tries} ${entry.tries === 1 ? "try" : "tries"}</span>
+      <span class="attempt-grade">${escapeHtml(entry.logged_grade)}</span>
+      ${entry.comment ? `<span class="attempt-comment">${escapeHtml(entry.comment)}</span>` : ""}
+    </div>
+  `).join("");
+}
+
+function filteredClimbs() {
+  const query = state.climbQuery.trim().toLowerCase();
+  const climbs = state.climbs.filter((climb) => (
+    climbMatchesFilter(climb, state.climbFilter)
+    && (!query || climb.name.toLowerCase().includes(query))
+  ));
+  climbs.sort(CLIMB_SORTERS[state.climbSort] || CLIMB_SORTERS.recent);
+  return climbs;
+}
+
+function renderClimbs() {
+  const sent = state.climbs.filter((climb) => climb.sends > 0);
+  const hardest = sent
+    .filter((climb) => gradeRank(climb.grade) >= 0)
+    .reduce((best, climb) => (
+      !best || gradeRank(climb.grade) > gradeRank(best.grade) ? climb : best
+    ), null);
+  const stats = [
+    ["Climbs sent", sent.length],
+    ["Projects", state.climbs.length - sent.length],
+    ["Flashes", state.climbs.filter((climb) => climb.flashed).length],
+    ["Repeated", state.climbs.filter((climb) => climb.repeated).length],
+    ["Hardest send", hardest ? escapeHtml(hardest.grade) : "&mdash;"],
+  ];
+  $("climbStats").innerHTML = stats.map(([label, value]) => (
+    `<div class="stat"><strong>${value}</strong><span>${label}</span></div>`
+  )).join("");
+
+  const climbs = filteredClimbs();
+  $("climbCount").textContent = `${climbs.length} of ${state.climbs.length} climbs`;
+
+  // Old CSVs predate the community columns; drop the column instead of showing
+  // a dash for every row.
+  const hasCommunity = state.climbs.some((climb) => climb.communitySends !== null);
+  $("climbHistoryTable").classList.toggle("no-community", !hasCommunity);
+
+  $("climbHistoryRows").innerHTML = climbs.map((climb, index) => {
+    const community = climb.communitySends === null
+      ? "&mdash;"
+      : `${climb.communitySends} sends${climb.quality === null ? "" : ` &middot; &#9733;${climb.quality.toFixed(1)}`}`;
+    const tries = climb.triesToFirstSend === null
+      ? `${climb.totalTries}`
+      : `${climb.triesToFirstSend} <span class="tries-total">/ ${climb.totalTries} total</span>`;
+    return `<tr class="climb-row" data-climb-index="${index}" aria-expanded="false" tabindex="0">
+      <td>
+        <span class="climb-name">${escapeHtml(climb.name)}${climb.mirror ? " (mirror)" : ""}</span>
+        ${climbBadges(climb)}
+      </td>
+      <td>${escapeHtml(climb.grade)}</td>
+      <td>${climb.angle}&deg;</td>
+      <td>${climb.sends}</td>
+      <td title="Tries to first send / total tries">${tries}</td>
+      <td>${climb.sessions}</td>
+      <td>${climb.firstSendDate ? formatDate(climb.firstSendDate) : "&mdash;"}</td>
+      <td>${formatDate(climb.lastClimbed)}</td>
+      <td>${community}</td>
+    </tr>
+    <tr class="climb-detail is-hidden">
+      <td colspan="9">${climbDetailHtml(climb)}</td>
+    </tr>`;
+  }).join("") || "<tr><td colspan='9' class='hint'>No climbs match the current filters.</td></tr>";
+}
+
+function setView(view) {
+  state.view = view;
+  const showSessions = view === "sessions";
+  $("sessionsView").classList.toggle("is-hidden", !showSessions);
+  $("climbsView").classList.toggle("is-hidden", showSessions);
+  $("viewSessionsTab").classList.toggle("is-active", showSessions);
+  $("viewClimbsTab").classList.toggle("is-active", !showSessions);
+  $("viewSessionsTab").setAttribute("aria-selected", String(showSessions));
+  $("viewClimbsTab").setAttribute("aria-selected", String(!showSessions));
+}
+
 $("knockForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
@@ -494,6 +679,52 @@ $("nextDay").addEventListener("click", () => {
 });
 
 $("exportCsvButton").addEventListener("click", exportCsv);
+
+$("viewSessionsTab").addEventListener("click", () => setView("sessions"));
+$("viewClimbsTab").addEventListener("click", () => setView("climbs"));
+
+$("climbSearch").addEventListener("input", (event) => {
+  state.climbQuery = event.target.value;
+  renderClimbs();
+});
+
+$("climbFilters").addEventListener("click", (event) => {
+  const chip = event.target.closest(".chip");
+  if (!chip) return;
+  state.climbFilter = chip.dataset.filter;
+  $("climbFilters").querySelectorAll(".chip").forEach((button) => {
+    button.classList.toggle("is-active", button === chip);
+  });
+  renderClimbs();
+});
+
+$("climbSort").addEventListener("change", (event) => {
+  state.climbSort = event.target.value;
+  renderClimbs();
+});
+
+// Expand/collapse a climb's attempt history. Rows are keyboard-focusable
+// (tabindex=0) so Enter/Space works too.
+function toggleClimbRow(row) {
+  const detail = row.nextElementSibling;
+  if (!detail || !detail.classList.contains("climb-detail")) return;
+  const expanded = detail.classList.toggle("is-hidden");
+  row.setAttribute("aria-expanded", String(!expanded));
+}
+
+$("climbHistoryRows").addEventListener("click", (event) => {
+  const row = event.target.closest(".climb-row");
+  if (row) toggleClimbRow(row);
+});
+
+$("climbHistoryRows").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const row = event.target.closest(".climb-row");
+  if (row) {
+    event.preventDefault();
+    toggleClimbRow(row);
+  }
+});
 
 $("loadDifferentButton").addEventListener("click", () => {
   $("connect").classList.remove("is-hidden");
