@@ -208,6 +208,34 @@ def get_climb_name_mapping(database, climb_uuids):
     return mapping
 
 
+def get_climb_stats_mapping(database, climb_uuids):
+    """
+    Batch lookup of community stats from the climb_stats table.
+
+    :return: A dictionary mapping (climb_uuid, angle) to a dict with
+        display_difficulty, benchmark_difficulty, ascensionist_count, and
+        quality_average.
+    """
+    unique_uuids = list(set(climb_uuids))
+    mapping = {}
+    with _connection(database) as connection:
+        for chunk in _chunks(unique_uuids):
+            placeholders = ", ".join("?" * len(chunk))
+            for climb_uuid, angle, display, benchmark, ascensionists, quality in connection.execute(
+                f"SELECT climb_uuid, angle, display_difficulty, benchmark_difficulty, "
+                f"ascensionist_count, quality_average "
+                f"FROM climb_stats WHERE climb_uuid IN ({placeholders})",
+                chunk,
+            ):
+                mapping[(climb_uuid, angle)] = {
+                    "display_difficulty": display,
+                    "benchmark_difficulty": benchmark,
+                    "ascensionist_count": ascensionists,
+                    "quality_average": quality,
+                }
+    return mapping
+
+
 def get_difficulty_stats_mapping(database, climb_uuids):
     """
     Batch variant of get_difficulty.
@@ -215,18 +243,10 @@ def get_difficulty_stats_mapping(database, climb_uuids):
     :return: A dictionary mapping (climb_uuid, angle) to
         (display_difficulty, benchmark_difficulty).
     """
-    unique_uuids = list(set(climb_uuids))
-    mapping = {}
-    with _connection(database) as connection:
-        for chunk in _chunks(unique_uuids):
-            placeholders = ", ".join("?" * len(chunk))
-            for climb_uuid, angle, display, benchmark in connection.execute(
-                f"SELECT climb_uuid, angle, display_difficulty, benchmark_difficulty "
-                f"FROM climb_stats WHERE climb_uuid IN ({placeholders})",
-                chunk,
-            ):
-                mapping[(climb_uuid, angle)] = (display, benchmark)
-    return mapping
+    return {
+        key: (stats["display_difficulty"], stats["benchmark_difficulty"])
+        for key, stats in get_climb_stats_mapping(database, climb_uuids).items()
+    }
 
 
 def get_image_filenames(database):

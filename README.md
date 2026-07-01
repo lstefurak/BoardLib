@@ -33,8 +33,14 @@ First, use the `database` command to download the SQLite database file for the b
 This outputs a CSV file with the following fields:
 
 ```json
-["board", "angle", "climb_name", "date", "logged_grade", "displayed_grade", "is_benchmark", "tries", "is_mirror", "sessions_count", "tries_total", "is_repeat", "is_ascent", "comment"]
+["board", "angle", "climb_name", "date", "logged_grade", "displayed_grade", "is_benchmark", "tries", "is_mirror", "sessions_count", "tries_total", "is_repeat", "is_ascent", "comment", "climb_uuid", "ascensionist_count", "quality_average"]
 ```
+
+The last three fields come from the board's shared `climb_stats`/`climbs` data:
+`climb_uuid` is the board's stable climb identifier, and `ascensionist_count` /
+`quality_average` are community stats (total sends and average star rating) for
+the climb at the logged angle. They are populated for Aurora boards only and
+left empty for the Moonboard.
 
 #### Supported Boards 🛹
 
@@ -67,6 +73,18 @@ Then open `http://127.0.0.1:8765/tension-logbook-report.html` in a browser.
 ### GitHub Pages App
 
 The `docs/` folder contains a static GitHub Pages app called "The Board Room." It can load a local BoardLib CSV in the browser, or call a private AWS Lambda Function URL that returns JSON logbook rows.
+
+The dashboard has two views:
+
+- **Sessions** — the original per-day report: stat cards, grade chart, workout
+  log, and the day's climb list.
+- **Climbs** — per-climb send history: one row per climb + angle (mirrors
+  listed separately) with sends, tries to first send / total tries, sessions,
+  first-send and last-climbed dates, plus flash/repeat/benchmark/project
+  badges and community stats (total sends, average quality) when the data
+  includes them. Rows expand to show the full attempt history, and the view
+  can be searched, filtered (sent / projects / repeated / flashed /
+  benchmarks), and sorted.
 
 The static page holds **no secrets** — all GitHub Pages JavaScript is public, so
 nothing secret can be hidden there, encrypted or otherwise. Security is enforced
