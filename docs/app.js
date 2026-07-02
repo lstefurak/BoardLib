@@ -14,6 +14,8 @@ const state = {
   climbFilter: "all",
   climbQuery: "",
   climbSort: "recent",
+  climbSortReversed: false,
+  groupClimbVariants: true,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -157,6 +159,7 @@ function normalizeRows(rawRows) {
     return {
       board: cleanText(row.board),
       angle: parseIntSafe(row.angle),
+      climb_uuid: cleanText(row.climb_uuid),
       climb_name: cleanText(row.climb_name),
       date: date.toISOString(),
       session_date: date.toISOString().slice(0, 10),
@@ -197,7 +200,7 @@ function summarize(rows) {
       board: sessionRows[0]?.board || "",
       ascents: ascents.length,
       total_tries: sessionRows.reduce((sum, row) => sum + row.tries, 0),
-      unique_climbs: new Set(ascents.map((row) => row.climb_name)).size,
+      unique_climbs: new Set(ascents.map(climbGroupKey)).size,
       benchmarks: ascents.filter((row) => row.is_benchmark).length,
       repeats: ascents.filter((row) => row.is_repeat).length,
       angles: [...new Set(sessionRows.map((row) => row.angle))].sort((a, b) => a - b),
@@ -211,51 +214,116 @@ function summarize(rows) {
   return { sessions, gradeOrder };
 }
 
-// Per-climb send history. Groups by climb + mirror + angle — the same grouping
-// BoardLib itself uses for sessions_count/tries_total — so "the same climb at
-// a different angle" is a separate line, which is what board grades mean.
+function climbGroupKey(row) {
+  return row.climb_uuid || row.climb_name.toLowerCase();
+}
+
+function climbVariantKey(row) {
+  return `${row.is_mirror ? "mirror" : "original"}|${row.angle}`;
+}
+
+function summarizeVariant(entries) {
+  entries.sort((a, b) => a.date.localeCompare(b.date));
+  const sends = entries.filter((entry) => entry.is_ascent);
+  let triesToFirstSend = 0;
+  let firstSend = null;
+  for (const entry of entries) {
+    triesToFirstSend += entry.tries;
+    if (entry.is_ascent) {
+      firstSend = entry;
+      break;
+    }
+  }
+  const latest = entries[entries.length - 1];
+  const gradeSource = sends.length ? sends[sends.length - 1] : latest;
+  return {
+    name: entries[0].climb_name,
+    mirror: entries[0].is_mirror,
+    angle: entries[0].angle,
+    grade: gradeSource.logged_grade,
+    benchmark: entries.some((entry) => entry.is_benchmark),
+    sends: sends.length,
+    totalTries: entries.reduce((sum, entry) => sum + entry.tries, 0),
+    triesToFirstSend: firstSend ? triesToFirstSend : null,
+    sessions: new Set(entries.map((entry) => entry.session_date)).size,
+    firstSendDate: firstSend ? firstSend.session_date : null,
+    lastClimbed: latest.session_date,
+    flashed: entries[0].is_ascent && entries[0].tries === 1,
+    repeated: sends.length >= 2,
+    communitySends: latest.ascensionist_count,
+    quality: latest.quality_average,
+    entries,
+  };
+}
+
+function summarizeClimbGroup(entries) {
+  entries.sort((a, b) => a.date.localeCompare(b.date));
+  const byVariant = new Map();
+  entries.forEach((entry) => {
+    const key = climbVariantKey(entry);
+    if (!byVariant.has(key)) byVariant.set(key, []);
+    byVariant.get(key).push(entry);
+  });
+  const variants = [...byVariant.values()].map(summarizeVariant).sort((a, b) => (
+    a.angle - b.angle || Number(a.mirror) - Number(b.mirror)
+  ));
+  const sends = entries.filter((entry) => entry.is_ascent);
+  let triesToFirstSend = 0;
+  let firstGroupSend = null;
+  for (const entry of entries) {
+    triesToFirstSend += entry.tries;
+    if (entry.is_ascent) {
+      firstGroupSend = entry;
+      break;
+    }
+  }
+  const latest = entries[entries.length - 1];
+  const sentVariants = variants.filter((variant) => variant.sends > 0);
+  const bestVariant = sentVariants
+    .filter((variant) => gradeRank(variant.grade) >= 0)
+    .sort((a, b) => gradeRank(b.grade) - gradeRank(a.grade))[0]
+    || sentVariants[sentVariants.length - 1]
+    || variants[variants.length - 1];
+  const communityValues = variants
+    .map((variant) => variant.communitySends)
+    .filter((value) => value !== null);
+  const qualityValues = variants
+    .map((variant) => variant.quality)
+    .filter((value) => value !== null);
+
+  return {
+    name: entries[0].climb_name,
+    mirror: variants.some((variant) => variant.mirror),
+    angle: Math.min(...variants.map((variant) => variant.angle)),
+    angles: [...new Set(variants.map((variant) => variant.angle))],
+    grade: bestVariant.grade,
+    benchmark: variants.some((variant) => variant.benchmark),
+    sends: sends.length,
+    totalTries: entries.reduce((sum, entry) => sum + entry.tries, 0),
+    triesToFirstSend: firstGroupSend ? triesToFirstSend : null,
+    sessions: new Set(entries.map((entry) => entry.session_date)).size,
+    firstSendDate: firstGroupSend ? firstGroupSend.session_date : null,
+    lastClimbed: latest.session_date,
+    flashed: variants.some((variant) => variant.flashed),
+    repeated: sends.length >= 2,
+    communitySends: communityValues.length ? Math.max(...communityValues) : null,
+    quality: qualityValues.length ? qualityValues.reduce((sum, value) => sum + value, 0) / qualityValues.length : null,
+    variants,
+    entries,
+  };
+}
+
+// Per-climb send history. The default groups mirror and angle variants under a
+// stable board climb id, falling back to name for older CSV exports.
 function summarizeClimbs(rows) {
   const byClimb = new Map();
   rows.forEach((row) => {
-    const key = `${row.climb_name}|${row.is_mirror ? "m" : ""}|${row.angle}`;
+    const key = state.groupClimbVariants ? climbGroupKey(row) : `${climbGroupKey(row)}|${climbVariantKey(row)}`;
     if (!byClimb.has(key)) byClimb.set(key, []);
     byClimb.get(key).push(row);
   });
 
-  return [...byClimb.values()].map((entries) => {
-    entries.sort((a, b) => a.date.localeCompare(b.date));
-    const sends = entries.filter((entry) => entry.is_ascent);
-    let triesToFirstSend = 0;
-    let firstSend = null;
-    for (const entry of entries) {
-      triesToFirstSend += entry.tries;
-      if (entry.is_ascent) {
-        firstSend = entry;
-        break;
-      }
-    }
-    const latest = entries[entries.length - 1];
-    // Grade of record: the most recent send's grade, else the latest entry's.
-    const gradeSource = sends.length ? sends[sends.length - 1] : latest;
-    return {
-      name: entries[0].climb_name,
-      mirror: entries[0].is_mirror,
-      angle: entries[0].angle,
-      grade: gradeSource.logged_grade,
-      benchmark: entries.some((entry) => entry.is_benchmark),
-      sends: sends.length,
-      totalTries: entries.reduce((sum, entry) => sum + entry.tries, 0),
-      triesToFirstSend: firstSend ? triesToFirstSend : null,
-      sessions: new Set(entries.map((entry) => entry.session_date)).size,
-      firstSendDate: firstSend ? firstSend.session_date : null,
-      lastClimbed: latest.session_date,
-      flashed: entries[0].is_ascent && entries[0].tries === 1,
-      repeated: sends.length >= 2,
-      communitySends: latest.ascensionist_count,
-      quality: latest.quality_average,
-      entries,
-    };
-  });
+  return [...byClimb.values()].map(summarizeClimbGroup);
 }
 
 function loadCsvText(text, sourceLabel) {
@@ -461,6 +529,7 @@ const CLIMB_SORTERS = {
 
 function climbBadges(climb) {
   const badges = [];
+  if (climb.variants.length > 1) badges.push(`<span class="badge badge-variants">${climb.variants.length} variants</span>`);
   if (climb.sends === 0) badges.push('<span class="badge badge-project">project</span>');
   if (climb.flashed) badges.push('<span class="badge badge-flash">flash</span>');
   if (climb.repeated) badges.push('<span class="badge badge-repeat">repeated</span>');
@@ -468,14 +537,38 @@ function climbBadges(climb) {
   return badges.join("");
 }
 
+function variantIconHtml(variant) {
+  return `<span class="variant-icon ${variant.mirror ? "is-mirror" : "is-original"}" aria-label="${variant.mirror ? "mirror" : "original"}"></span>`;
+}
+
+function angleVariantsHtml(climb) {
+  return climb.variants.map((variant) => {
+    const stateClass = variant.sends > 0 ? "is-sent" : "is-project";
+    const title = `${variant.mirror ? "Mirror" : "Original"} at ${variant.angle} degrees: ${variant.sends ? `${variant.sends} sends` : "project"}`;
+    return `<span class="angle-chip ${stateClass}" title="${escapeHtml(title)}">
+      ${variantIconHtml(variant)}
+      <span>${variant.angle}&deg;</span>
+    </span>`;
+  }).join("");
+}
+
 function climbDetailHtml(climb) {
-  return climb.entries.map((entry) => `
-    <div class="attempt-line">
-      <span class="attempt-date">${formatDate(entry.session_date)}</span>
-      <span class="attempt-kind ${entry.is_ascent ? "is-send" : ""}">${entry.is_ascent ? "send" : "attempt"}</span>
-      <span class="attempt-tries">${entry.tries} ${entry.tries === 1 ? "try" : "tries"}</span>
-      <span class="attempt-grade">${escapeHtml(entry.logged_grade)}</span>
-      ${entry.comment ? `<span class="attempt-comment">${escapeHtml(entry.comment)}</span>` : ""}
+  return climb.variants.map((variant) => `
+    <div class="variant-detail">
+      <div class="variant-heading">
+        ${variantIconHtml(variant)}
+        <strong>${variant.mirror ? "Mirror" : "Original"} at ${variant.angle}&deg;</strong>
+        <span>${variant.sends} sends, ${variant.totalTries} tries</span>
+      </div>
+      ${variant.entries.map((entry) => `
+        <div class="attempt-line">
+          <span class="attempt-date">${formatDate(entry.session_date)}</span>
+          <span class="attempt-kind ${entry.is_ascent ? "is-send" : ""}">${entry.is_ascent ? "send" : "attempt"}</span>
+          <span class="attempt-tries">${entry.tries} ${entry.tries === 1 ? "try" : "tries"}</span>
+          <span class="attempt-grade">${escapeHtml(entry.logged_grade)}</span>
+          ${entry.comment ? `<span class="attempt-comment">${escapeHtml(entry.comment)}</span>` : ""}
+        </div>
+      `).join("")}
     </div>
   `).join("");
 }
@@ -487,6 +580,7 @@ function filteredClimbs() {
     && (!query || climb.name.toLowerCase().includes(query))
   ));
   climbs.sort(CLIMB_SORTERS[state.climbSort] || CLIMB_SORTERS.recent);
+  if (state.climbSortReversed) climbs.reverse();
   return climbs;
 }
 
@@ -525,11 +619,11 @@ function renderClimbs() {
       : `${climb.triesToFirstSend} <span class="tries-total">/ ${climb.totalTries} total</span>`;
     return `<tr class="climb-row" data-climb-index="${index}" aria-expanded="false" tabindex="0">
       <td>
-        <span class="climb-name">${escapeHtml(climb.name)}${climb.mirror ? " (mirror)" : ""}</span>
+        <span class="climb-name">${escapeHtml(climb.name)}</span>
         ${climbBadges(climb)}
       </td>
       <td>${escapeHtml(climb.grade)}</td>
-      <td>${climb.angle}&deg;</td>
+      <td><div class="angle-variants">${angleVariantsHtml(climb)}</div></td>
       <td>${climb.sends}</td>
       <td title="Tries to first send / total tries">${tries}</td>
       <td>${climb.sessions}</td>
@@ -700,6 +794,19 @@ $("climbFilters").addEventListener("click", (event) => {
 
 $("climbSort").addEventListener("change", (event) => {
   state.climbSort = event.target.value;
+  renderClimbs();
+});
+
+$("climbSortDirection").addEventListener("click", () => {
+  state.climbSortReversed = !state.climbSortReversed;
+  $("climbSortDirection").classList.toggle("is-active", state.climbSortReversed);
+  $("climbSortDirection").setAttribute("aria-pressed", String(state.climbSortReversed));
+  renderClimbs();
+});
+
+$("climbGroupVariants").addEventListener("change", (event) => {
+  state.groupClimbVariants = event.target.checked;
+  state.climbs = summarizeClimbs(state.rows);
   renderClimbs();
 });
 
