@@ -106,7 +106,7 @@
 
         <div class="tabs view-tabs" role="tablist" aria-label="Dashboard view">
           <button class="tab is-active" id="viewSessionsTab" type="button" role="tab" aria-selected="true" aria-controls="sessionsView">Sessions</button>
-          <button class="tab" id="viewClimbsTab" type="button" role="tab" aria-selected="false" aria-controls="climbsView">Climbs</button>
+          <button class="tab" id="viewClimbsTab" type="button" role="tab" aria-selected="false" aria-controls="climbsView">All-time climbs</button>
         </div>
 
         <div id="sessionsView" role="tabpanel" aria-labelledby="viewSessionsTab">
@@ -173,6 +173,13 @@
               <option value="name">Name</option>
               <option value="angle">Angle</option>
             </select>
+            <div class="toggle-group" aria-label="Climb table options">
+              <button class="sort-direction" id="climbSortDirection" type="button" aria-pressed="false">Reverse</button>
+              <label class="toggle">
+                <input id="climbGroupVariants" type="checkbox" checked>
+                <span>Group variants</span>
+              </label>
+            </div>
           </div>
 
           <p class="hint climb-count" id="climbCount"></p>

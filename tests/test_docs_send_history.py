@@ -20,6 +20,7 @@ def test_dashboard_has_view_switcher():
     assert tablist is not None
     tabs = tablist.find_all("button", attrs={"role": "tab"})
     assert [tab.get("id") for tab in tabs] == ["viewSessionsTab", "viewClimbsTab"]
+    assert tabs[1].get_text(strip=True) == "All-time climbs"
     # Sessions is the default view; Climbs starts unselected.
     assert tabs[0].get("aria-selected") == "true"
     assert tabs[1].get("aria-selected") == "false"
@@ -47,6 +48,10 @@ def test_climbs_view_has_controls_and_history_table():
 
     assert climbs_view.find(id="climbSearch") is not None
     assert climbs_view.find(id="climbSort") is not None
+    assert climbs_view.find(id="climbSortDirection") is not None
+    group_toggle = climbs_view.find(id="climbGroupVariants")
+    assert group_toggle is not None
+    assert group_toggle.has_attr("checked")
     filters = climbs_view.find(id="climbFilters")
     assert filters is not None
     assert {chip.get("data-filter") for chip in filters.find_all("button")} == {
@@ -84,3 +89,11 @@ def test_climb_rendering_escapes_board_authored_content():
     assert "escapeHtml(climb.grade)" in js
     assert "escapeHtml(entry.comment)" in js
     assert "escapeHtml(entry.logged_grade)" in js
+
+
+def test_climbs_group_by_stable_climb_identity():
+    js = DOCS_APP.read_text(encoding="utf-8")
+
+    assert "climb_uuid: cleanText(row.climb_uuid)" in js
+    assert "return row.climb_uuid || row.climb_name.toLowerCase()" in js
+    assert "climbVariantKey(row)" in js

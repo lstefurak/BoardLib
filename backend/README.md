@@ -48,7 +48,10 @@ Body:
       "tries_total": 1,
       "is_repeat": false,
       "is_ascent": true,
-      "comment": ""
+      "comment": "",
+      "climb_uuid": "69d9e7c4-example",
+      "ascensionist_count": 320,
+      "quality_average": 3.6
     }
   ]
 }

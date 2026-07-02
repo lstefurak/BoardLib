@@ -707,7 +707,7 @@ button.primary.is-busy .btn-spinner {
 
 .climb-controls {
   display: grid;
-  grid-template-columns: minmax(180px, 260px) 1fr auto;
+  grid-template-columns: minmax(180px, 260px) 1fr auto auto;
   gap: 10px;
   align-items: center;
 }
@@ -737,6 +737,48 @@ button.primary.is-busy .btn-spinner {
   background: var(--accent);
   border-color: var(--accent);
   color: white;
+}
+
+.toggle-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.sort-direction {
+  min-height: 34px;
+  padding: 0 12px;
+  background: white;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sort-direction.is-active {
+  background: var(--ink);
+  color: white;
+}
+
+.toggle {
+  display: inline-flex;
+  grid-auto-flow: column;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: white;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.toggle input {
+  width: 16px;
+  min-height: 16px;
+  accent-color: var(--accent);
 }
 
 .climb-count {
@@ -800,9 +842,55 @@ button.primary.is-busy .btn-spinner {
   color: var(--accent-2);
 }
 
+.badge-variants {
+  background: #eef6ff;
+  color: #075985;
+}
+
 .tries-total {
   color: var(--muted);
   font-size: 12px;
+}
+
+.angle-variants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 138px;
+}
+
+.angle-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #f4f6f5;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.angle-chip.is-sent {
+  border-color: rgba(15, 118, 110, .35);
+  background: var(--soft);
+  color: var(--accent);
+}
+
+.variant-icon {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.variant-icon.is-mirror {
+  background: linear-gradient(90deg, currentColor 0 50%, transparent 50% 100%);
 }
 
 /* Loaded data may predate the community-stats columns; app.js adds
@@ -815,6 +903,25 @@ button.primary.is-busy .btn-spinner {
 .climb-detail > td {
   background: var(--paper);
   padding: 10px 14px 14px;
+}
+
+.variant-detail + .variant-detail {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.variant-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.variant-heading span {
+  color: var(--muted);
 }
 
 .attempt-line {
@@ -842,6 +949,12 @@ button.primary.is-busy .btn-spinner {
 
   .climb-controls select {
     width: 100%;
+  }
+
+  .toggle-group {
+    align-items: stretch;
+    flex-wrap: wrap;
+    white-space: normal;
   }
 
   .attempt-line {
