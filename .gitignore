@@ -15,3 +15,5 @@ build/
 tfplan
 terraform.tfvars
 docs/site.config.local.js
+# Local-only operator scripts (e.g. secret rotation) - never committed.
+*.local.sh

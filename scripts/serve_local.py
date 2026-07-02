@@ -11,11 +11,15 @@ contacting the backend, and you can drive the redesigned dashboard from a CSV
 Usage:
     python scripts/serve_local.py
     # then open http://localhost:8000
+
+    python scripts/serve_local.py --write-config-only
+    # regenerate docs/site.config.local.js without starting a server
 """
 import http.server
 import json
 import os
 import socketserver
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -55,6 +59,14 @@ def write_local_config(env):
 def main():
     env = load_env(ENV)
     cfg = write_local_config(env)
+
+    if "--write-config-only" in sys.argv:
+        # Regenerate site.config.local.js from .env and exit without serving.
+        # Used by rotation tooling that just needs the prefill refreshed.
+        knock_state = "set" if cfg.get("knock") else "NOT set"
+        print(f"Wrote {DOCS / 'site.config.local.js'} (gate phrase: {knock_state})")
+        return
+
     os.chdir(DOCS)
 
     knock_state = "set" if cfg.get("knock") else "NOT set -- add BOARDLOG_KNOCK to .env"
