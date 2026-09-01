@@ -6,6 +6,7 @@ import hmac
 import json
 import os
 import pathlib
+import re
 import sys
 import time
 import traceback
@@ -41,6 +42,10 @@ DEFAULT_MAX_SYNC_PAGES = 100
 # invalidates every outstanding session, and the page never sees the access key.
 DEFAULT_SESSION_TTL_SECONDS = 12 * 60 * 60
 SESSION_MESSAGE_PREFIX = b"boardlog-session:"
+# The expiry half of a token is a unix timestamp: ASCII digits only, and short
+# enough that int() can never choke on it. (str.isdigit() also accepts Unicode
+# digits that int() rejects, which would turn a garbage header into a 502.)
+SESSION_EXPIRY_RE = re.compile(r"[0-9]{1,12}")
 
 
 class BoardLoginError(Exception):
@@ -204,13 +209,16 @@ def session_signing_key() -> bytes | None:
 
     Binding the key to both secrets means rotating either one revokes every
     outstanding session at the next cold start, with no extra state to keep.
-    In Lambda a missing secret fails closed (no sessions can be minted or
-    verified); locally, unconfigured secrets simply mean auth is off.
+    Sessions exist only when BOTH secrets are configured, in every runtime: a
+    half-configured local run must not be able to mint a token that bypasses
+    the one secret that is configured. (Locally, exports still work through
+    the header path, where an unconfigured check is disabled.)
     """
-    gate = resolve_secret(*GATE_SECRET) or ""
-    access = resolve_secret(*ACCESS_SECRET) or ""
-    if running_in_lambda() and not (gate and access):
-        print("WARNING: gate phrase and/or access key not configured; refusing to sign sessions")
+    gate = resolve_secret(*GATE_SECRET)
+    access = resolve_secret(*ACCESS_SECRET)
+    if not (gate and access):
+        if running_in_lambda():
+            print("WARNING: gate phrase and/or access key not configured; refusing to sign sessions")
         return None
     return hashlib.sha256(gate.encode("utf-8") + b"\x00" + access.encode("utf-8")).digest()
 
@@ -234,7 +242,7 @@ def issue_session() -> tuple[str, int] | None:
 def verify_session(token: str) -> bool:
     """Constant-time check of a session token; False for anything malformed or stale."""
     expiry_text, _, provided = str(token or "").partition(".")
-    if not expiry_text.isdigit() or not provided:
+    if not SESSION_EXPIRY_RE.fullmatch(expiry_text) or not provided:
         return False
     expires_at = int(expiry_text)
     if expires_at <= int(time.time()):

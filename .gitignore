@@ -17,3 +17,5 @@ terraform.tfvars
 docs/site.config.local.js
 # Local-only operator scripts (e.g. secret rotation) - never committed.
 *.local.sh
+# Local Google Photos Takeout clips for tools/instagram_board_publisher.py - never committed.
+videos/

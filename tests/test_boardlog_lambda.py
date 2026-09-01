@@ -262,6 +262,27 @@ class TestBoardLogLambda(unittest.TestCase):
         # ...and nothing verifies either.
         self.assertFalse(handler.verify_session(f"{int(time.time()) + 60}.abc"))
 
+    def test_malformed_session_headers_are_refused_not_crashed(self):
+        # Anything that is not "<ascii digits>.<signature>" must be a clean 403,
+        # never a 502 from int() choking on Unicode digits or a huge number.
+        self.configure_secrets()
+        for token in ("\u00b2.x", "\u0663\u0664.x", "9" * 5000 + ".x", "1e9.x", ".", "..", "-5.x"):
+            with self.subTest(token=token):
+                self.assertEqual(self.export_with_session(token)["statusCode"], 403)
+
+    def test_sessions_need_both_secrets_even_outside_lambda(self):
+        # A half-configured local run must not mint a token that bypasses the
+        # one secret that IS configured; the header path still enforces it.
+        os.environ["BOARDLOG_ACCESS_KEY"] = "secret"  # gate phrase unset
+        response, payload = self.unlock()
+        self.assertEqual(response["statusCode"], 200)
+        self.assertNotIn("session", payload)
+        self.assertFalse(handler.verify_session(f"{int(time.time()) + 60}.abc"))
+        response = handler.lambda_handler(
+            self.event({"board": "tension", "username": "u", "password": "p"}), None
+        )
+        self.assertEqual(response["statusCode"], 403)
+
     def test_session_ttl_is_configurable(self):
         self.configure_secrets()
         os.environ["BOARDLOG_SESSION_TTL_SECONDS"] = "60"
