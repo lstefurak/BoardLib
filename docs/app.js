@@ -14,7 +14,9 @@ const state = {
   climbFilter: "all",
   climbQuery: "",
   climbSort: "recent",
-  climbSortReversed: false,
+  climbSortDirection: "desc",
+  // Selected angles (empty = any angle). Rebuilt from the data on every load.
+  climbAngles: new Set(),
   groupClimbVariants: true,
 };
 
@@ -388,8 +390,10 @@ function loadRows(rows, sourceLabel, rawRows) {
   state.gradeOrder = summary.gradeOrder;
   state.selectedIndex = state.sessions.length - 1;
   state.climbs = summarizeClimbs(rows);
+  state.climbAngles = new Set();
   renderSessionOptions();
   render();
+  renderAngleFilters();
   renderClimbs();
 
   // Data is in: focus the dashboard and tuck the fetch form away. The header's
@@ -553,14 +557,86 @@ function gradeRank(grade) {
   return key === 999 ? -1 : key;
 }
 
-const CLIMB_SORTERS = {
-  recent: (a, b) => b.lastClimbed.localeCompare(a.lastClimbed) || a.name.localeCompare(b.name),
-  grade: (a, b) => gradeRank(b.grade) - gradeRank(a.grade) || a.name.localeCompare(b.name),
-  tries: (a, b) => b.totalTries - a.totalTries || a.name.localeCompare(b.name),
-  sends: (a, b) => b.sends - a.sends || a.name.localeCompare(b.name),
-  name: (a, b) => a.name.localeCompare(b.name) || a.angle - b.angle,
-  angle: (a, b) => a.angle - b.angle || a.name.localeCompare(b.name),
+// Every column header sorts by its own key (the th's data-sort). The first
+// click uses the column's natural direction; a second click reverses it. A null
+// key (no send yet, no community data, unparseable grade) sinks to the bottom
+// in both directions, and ties fall back to name, then angle.
+const CLIMB_COLUMNS = {
+  name: { key: (climb) => climb.name, defaultDirection: "asc" },
+  grade: { key: (climb) => (gradeRank(climb.grade) < 0 ? null : gradeRank(climb.grade)), defaultDirection: "desc" },
+  // With variants grouped this is the lowest angle in the group.
+  angle: { key: (climb) => climb.angle, defaultDirection: "asc" },
+  sends: { key: (climb) => climb.sends, defaultDirection: "desc" },
+  tries: { key: (climb) => climb.totalTries, defaultDirection: "desc" },
+  sessions: { key: (climb) => climb.sessions, defaultDirection: "desc" },
+  firstSend: { key: (climb) => climb.firstSendDate, defaultDirection: "desc" },
+  recent: { key: (climb) => climb.lastClimbed, defaultDirection: "desc" },
+  communitySends: { key: (climb) => climb.communitySends, defaultDirection: "desc" },
+  quality: { key: (climb) => climb.quality, defaultDirection: "desc" },
 };
+
+function compareValues(a, b) {
+  return typeof a === "string" ? a.localeCompare(b) : a - b;
+}
+
+function climbComparator(column, direction) {
+  const spec = CLIMB_COLUMNS[column] || CLIMB_COLUMNS.recent;
+  const sign = direction === "asc" ? 1 : -1;
+  const tiebreak = (a, b) => a.name.localeCompare(b.name) || a.angle - b.angle;
+  return (a, b) => {
+    const left = spec.key(a);
+    const right = spec.key(b);
+    if (left === null || right === null) {
+      if (left === right) return tiebreak(a, b);
+      return left === null ? 1 : -1;
+    }
+    return sign * compareValues(left, right) || tiebreak(a, b);
+  };
+}
+
+// Angle is a filter, not a sort option. With variants grouped a climb stays
+// visible when any of its variants sits at a selected angle; the chips for its
+// other angles are dimmed so the match is visible. Empty selection = any angle.
+function climbMatchesAngles(climb) {
+  return state.climbAngles.size === 0 || climb.angles.some((angle) => state.climbAngles.has(angle));
+}
+
+function loadedAngles() {
+  return [...new Set(state.rows.map((row) => row.angle))].sort((a, b) => a - b);
+}
+
+function renderAngleFilters() {
+  const chips = loadedAngles().map((angle) => (
+    `<button class="chip" type="button" data-angle="${angle}" aria-pressed="false">${angle}&deg;</button>`
+  ));
+  $("climbAngles").innerHTML = [
+    '<button class="chip" type="button" data-angle="any" aria-pressed="false">Any</button>',
+    ...chips,
+  ].join("");
+  syncAngleChips();
+}
+
+// Update the chips in place (rather than re-rendering) so keyboard focus stays
+// on the chip that was just toggled.
+function syncAngleChips() {
+  const anyAngle = state.climbAngles.size === 0;
+  $("climbAngles").querySelectorAll(".chip").forEach((chip) => {
+    const active = chip.dataset.angle === "any" ? anyAngle : state.climbAngles.has(Number(chip.dataset.angle));
+    chip.classList.toggle("is-active", active);
+    chip.setAttribute("aria-pressed", String(active));
+  });
+  $("angleLegendDimmed").classList.toggle("is-hidden", anyAngle);
+}
+
+function syncSortHeaders() {
+  $("climbHistoryTable").querySelectorAll("th[data-sort]").forEach((header) => {
+    if (header.dataset.sort === state.climbSort) {
+      header.setAttribute("aria-sort", state.climbSortDirection === "asc" ? "ascending" : "descending");
+    } else {
+      header.removeAttribute("aria-sort");
+    }
+  });
+}
 
 function climbBadges(climb) {
   const badges = [];
@@ -572,26 +648,111 @@ function climbBadges(climb) {
   return badges.join("");
 }
 
-function variantIconHtml(variant) {
-  return `<span class="variant-icon ${variant.mirror ? "is-mirror" : "is-original"}" aria-label="${variant.mirror ? "mirror" : "original"}"></span>`;
+// The check is the Tension app's own mark, built from two strokes: the short
+// left "\" lights up for a send in the original orientation, the long right
+// "/" for a mirrored send, both together for a climb sent both ways. A faint
+// stroke is an orientation that was tried but not sent; a missing stroke was
+// never tried. Inline SVG, no external assets.
+function checkMarkSvg(strokes) {
+  return '<svg class="check-mark" viewBox="0 0 12 12" aria-hidden="true" focusable="false">'
+    + `<path class="stroke-original is-${strokes.original}" d="M2 6.5 5 9.5"></path>`
+    + `<path class="stroke-mirror is-${strokes.mirror}" d="M5 9.5 10.5 2.5"></path>`
+    + "</svg>";
+}
+
+function strokeState(variant) {
+  if (!variant) return "off";
+  return variant.sends > 0 ? "lit" : "ghost";
+}
+
+// One chip per angle. With variants grouped, the original and mirror variants
+// at the same angle share a chip; an ungrouped row carries a single orientation.
+function angleGroups(variants) {
+  const byAngle = new Map();
+  variants.forEach((variant) => {
+    if (!byAngle.has(variant.angle)) byAngle.set(variant.angle, { angle: variant.angle, original: null, mirror: null });
+    byAngle.get(variant.angle)[variant.mirror ? "mirror" : "original"] = variant;
+  });
+  return [...byAngle.values()].sort((a, b) => a.angle - b.angle);
+}
+
+function variantGroup(variant) {
+  return { angle: variant.angle, original: variant.mirror ? null : variant, mirror: variant.mirror ? variant : null };
+}
+
+function orientationText(name, variant) {
+  if (!variant) return null;
+  if (variant.sends === 0) return `${name} tried, not sent`;
+  return `${name} sent ${variant.sends === 1 ? "once" : `${variant.sends} times`}`;
+}
+
+// A sent chip is filled; a project chip (no send at that angle in either
+// orientation) stays outlined. The aria-label/title spell the marks out in
+// words. Decorative chips (next to a heading that already says it) are hidden
+// from screen readers.
+function angleChipHtml(group, { dimmed = false, decorative = false } = {}) {
+  const sent = Boolean((group.original && group.original.sends > 0) || (group.mirror && group.mirror.sends > 0));
+  const parts = [orientationText("original", group.original), orientationText("mirror", group.mirror)].filter(Boolean);
+  const label = `${group.angle} degrees: ${parts.join("; ")}`
+    + (sent ? "" : " (project)")
+    + (dimmed ? "; outside the angle filter" : "");
+  const classes = ["angle-chip", sent ? "is-sent" : "is-project"];
+  if (dimmed) classes.push("is-dimmed");
+  const naming = decorative
+    ? 'aria-hidden="true"'
+    : `role="img" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"`;
+  return `<span class="${classes.join(" ")}" ${naming}>`
+    + checkMarkSvg({ original: strokeState(group.original), mirror: strokeState(group.mirror) })
+    + `<span class="angle-value">${group.angle}&deg;</span>`
+    + "</span>";
+}
+
+function variantChipHtml(variant, options) {
+  return angleChipHtml(variantGroup(variant), options);
 }
 
 function angleVariantsHtml(climb) {
-  return climb.variants.map((variant) => {
-    const stateClass = variant.sends > 0 ? "is-sent" : "is-project";
-    const title = `${variant.mirror ? "Mirror" : "Original"} at ${variant.angle} degrees: ${variant.sends ? `${variant.sends} sends` : "project"}`;
-    return `<span class="angle-chip ${stateClass}" title="${escapeHtml(title)}">
-      ${variantIconHtml(variant)}
-      <span>${variant.angle}&deg;</span>
-    </span>`;
-  }).join("");
+  const filtering = state.climbAngles.size > 0;
+  return angleGroups(climb.variants).map((group) => angleChipHtml(group, {
+    dimmed: filtering && !state.climbAngles.has(group.angle),
+  })).join("");
+}
+
+// The legend is built from the same glyph helper as the table, so the two can
+// never drift apart. Samples are decorative; the words carry the meaning.
+function angleLegendHtml() {
+  const sample = (original, mirror, sent, extra = "") => (
+    `<span class="angle-chip ${sent ? "is-sent" : "is-project"}${extra}">`
+    + checkMarkSvg({ original, mirror })
+    + '<span class="angle-value">40&deg;</span></span>'
+  );
+  const items = [
+    [sample("lit", "off", true), "original sent"],
+    [sample("off", "lit", true), "mirror sent"],
+    [sample("lit", "lit", true), "sent both ways"],
+    [sample("ghost", "off", false), "project (tried, not sent)"],
+  ];
+  return '<span class="legend-title">Angle chips</span>'
+    + items.map(([chip, meaning]) => `<span class="legend-item">${chip}${meaning}</span>`).join("")
+    + `<span class="legend-item is-hidden" id="angleLegendDimmed">${sample("lit", "off", true, " is-dimmed")}outside the angle filter</span>`;
+}
+
+// Community quality is a 1-3 star average, shown the way the app shows it:
+// three stars with a fractional fill, plus the number for sorting by eye.
+function starsHtml(quality) {
+  const width = Math.round((Math.max(0, Math.min(3, quality)) / 3) * 100);
+  const value = quality.toFixed(1);
+  return `<span class="stars" title="${value} of 3 stars">`
+    + `<span class="stars-track" aria-hidden="true">&#9733;&#9733;&#9733;<span class="stars-fill" style="width:${width}%">&#9733;&#9733;&#9733;</span></span>`
+    + `<span class="stars-value">${value}</span>`
+    + "</span>";
 }
 
 function climbDetailHtml(climb) {
   return climb.variants.map((variant) => `
     <div class="variant-detail">
       <div class="variant-heading">
-        ${variantIconHtml(variant)}
+        ${variantChipHtml(variant, { decorative: true })}
         <strong>${variant.mirror ? "Mirror" : "Original"} at ${variant.angle}&deg;</strong>
         <span>${variant.sends} sends, ${variant.totalTries} tries</span>
       </div>
@@ -612,10 +773,10 @@ function filteredClimbs() {
   const query = state.climbQuery.trim().toLowerCase();
   const climbs = state.climbs.filter((climb) => (
     climbMatchesFilter(climb, state.climbFilter)
+    && climbMatchesAngles(climb)
     && (!query || climb.name.toLowerCase().includes(query))
   ));
-  climbs.sort(CLIMB_SORTERS[state.climbSort] || CLIMB_SORTERS.recent);
-  if (state.climbSortReversed) climbs.reverse();
+  climbs.sort(climbComparator(state.climbSort, state.climbSortDirection));
   return climbs;
 }
 
@@ -640,15 +801,16 @@ function renderClimbs() {
   const climbs = filteredClimbs();
   $("climbCount").textContent = `${climbs.length} of ${state.climbs.length} climbs`;
 
-  // Old CSVs predate the community columns; drop the column instead of showing
-  // a dash for every row.
-  const hasCommunity = state.climbs.some((climb) => climb.communitySends !== null);
+  // Old CSVs predate the community columns; drop both columns instead of
+  // showing a dash for every row.
+  const hasCommunity = state.climbs.some((climb) => climb.communitySends !== null || climb.quality !== null);
   $("climbHistoryTable").classList.toggle("no-community", !hasCommunity);
+  const columnCount = hasCommunity ? 10 : 8;
+  syncSortHeaders();
 
   $("climbHistoryRows").innerHTML = climbs.map((climb, index) => {
-    const community = climb.communitySends === null
-      ? "&mdash;"
-      : `${climb.communitySends} sends${climb.quality === null ? "" : ` &middot; &#9733;${climb.quality.toFixed(1)}`}`;
+    const communitySends = climb.communitySends === null ? "&mdash;" : climb.communitySends.toLocaleString();
+    const stars = climb.quality === null ? "&mdash;" : starsHtml(climb.quality);
     const tries = climb.triesToFirstSend === null
       ? `${climb.totalTries}`
       : `${climb.triesToFirstSend} <span class="tries-total">/ ${climb.totalTries} total</span>`;
@@ -660,16 +822,17 @@ function renderClimbs() {
       <td>${escapeHtml(climb.grade)}</td>
       <td><div class="angle-variants">${angleVariantsHtml(climb)}</div></td>
       <td>${climb.sends}</td>
-      <td title="Tries to first send / total tries">${tries}</td>
+      <td class="climb-tries" title="Tries to first send / total tries">${tries}</td>
       <td>${climb.sessions}</td>
       <td>${climb.firstSendDate ? formatDate(climb.firstSendDate) : "&mdash;"}</td>
       <td>${formatDate(climb.lastClimbed)}</td>
-      <td>${community}</td>
+      <td class="is-community is-community-start">${communitySends}</td>
+      <td class="is-community">${stars}</td>
     </tr>
     <tr class="climb-detail is-hidden">
-      <td colspan="9">${climbDetailHtml(climb)}</td>
+      <td colspan="${columnCount}">${climbDetailHtml(climb)}</td>
     </tr>`;
-  }).join("") || "<tr><td colspan='9' class='hint'>No climbs match the current filters.</td></tr>";
+  }).join("") || `<tr><td colspan="${columnCount}" class="hint">No climbs match the current filters.</td></tr>`;
 }
 
 function setView(view) {
@@ -830,15 +993,32 @@ $("climbFilters").addEventListener("click", (event) => {
   renderClimbs();
 });
 
-$("climbSort").addEventListener("change", (event) => {
-  state.climbSort = event.target.value;
+$("climbAngles").addEventListener("click", (event) => {
+  const chip = event.target.closest(".chip");
+  if (!chip) return;
+  if (chip.dataset.angle === "any") {
+    state.climbAngles.clear();
+  } else {
+    const angle = Number(chip.dataset.angle);
+    if (state.climbAngles.has(angle)) state.climbAngles.delete(angle);
+    else state.climbAngles.add(angle);
+  }
+  syncAngleChips();
   renderClimbs();
 });
 
-$("climbSortDirection").addEventListener("click", () => {
-  state.climbSortReversed = !state.climbSortReversed;
-  $("climbSortDirection").classList.toggle("is-active", state.climbSortReversed);
-  $("climbSortDirection").setAttribute("aria-pressed", String(state.climbSortReversed));
+// Click a column header to sort by it; click it again to reverse.
+$("climbHistoryTable").querySelector("thead").addEventListener("click", (event) => {
+  const button = event.target.closest(".sort-button");
+  const header = button && button.closest("th[data-sort]");
+  if (!header) return;
+  const column = header.dataset.sort;
+  if (state.climbSort === column) {
+    state.climbSortDirection = state.climbSortDirection === "asc" ? "desc" : "asc";
+  } else {
+    state.climbSort = column;
+    state.climbSortDirection = (CLIMB_COLUMNS[column] || CLIMB_COLUMNS.recent).defaultDirection;
+  }
   renderClimbs();
 });
 
@@ -895,6 +1075,8 @@ if (sessionIsLive(storedSession)) {
   sessionStorage.removeItem(SESSION_STORAGE_KEY);
   if (IS_LOCAL && local.knock) $("knockInput").value = local.knock;
 }
+
+$("angleLegend").innerHTML = angleLegendHtml();
 
 // Add a show/hide toggle to every password field.
 document.querySelectorAll('input[type="password"]').forEach((input) => {
