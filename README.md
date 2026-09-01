@@ -185,7 +185,7 @@ python tools/instagram_board_publisher.py /path/to/Takeout/Google\ Photos \
   --logbook data/tension-logbook.csv --output data/instagram-manifest.jsonl
 ```
 
-See [the research, privacy notes, and proposed publishing phases](docs/instagram-publisher.md).
+See [the research, privacy notes, and proposed publishing phases](specs/instagram-publisher/research.md).
 
 ## Bugs 🐞 and Feature Requests 🗒️
 
