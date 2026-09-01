@@ -185,8 +185,12 @@ human-reviewable caption manifest. It does not upload or post media:
 
 ```sh
 python tools/instagram_board_publisher.py /path/to/Takeout/Google\ Photos \
-  --logbook data/tension-logbook.csv --output data/instagram-manifest.jsonl
+  --logbook data/tension-logbook.csv --output data/instagram-manifest.jsonl \
+  --logbook-tz America/New_York
 ```
+
+Pass the timezone your logbook was recorded in: BoardLib exports naive local
+times, Takeout timestamps are UTC.
 
 See [the research, privacy notes, and proposed publishing phases](specs/instagram-publisher/research.md).
 
