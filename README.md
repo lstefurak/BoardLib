@@ -90,15 +90,17 @@ The static page holds **no secrets** — all GitHub Pages JavaScript is public, 
 nothing secret can be hidden there, encrypted or otherwise. Security is enforced
 entirely by the Lambda backend.
 
-There are two independent secrets, both typed at runtime and verified
-server-side against KMS-encrypted SSM parameters:
+From the user's side the whole login is one **gate phrase** (the "knock"). The
+page sends it as `X-Board-Gate`; the Lambda verifies it against a KMS-encrypted
+SSM parameter and answers with a short-lived **session token**, and every export
+presents that token as `X-Board-Session`. The token lives in `sessionStorage`
+for the tab; the phrase itself is never stored.
 
-- A **gate phrase** (`X-Board-Gate`) that unlocks the page UI. The gate button
-  asks the Lambda to verify it, so the door is real, not cosmetic.
-- An **access key** (`X-Board-Room-Key`) required for the actual export.
-
-Because they are separate, the gate phrase and access key can be rotated
-independently. Configure only the (non-secret) endpoint in `docs/site.config.js`:
+Under the hood there is still a second, independent secret — the **access key**
+(`X-Board-Room-Key`) — which scripts can send alongside the gate phrase, and
+which the Lambda combines with the gate phrase to sign session tokens. The page
+never sees it. Rotating either secret revokes every outstanding session.
+Configure only the (non-secret) endpoint in `docs/site.config.js`:
 
 ```js
 window.BOARDLOG_CONFIG = {
@@ -131,6 +133,7 @@ BOARDLOG_ACCESS_KEY_PARAM=/boardlog/access-key
 BOARDLOG_GATE_PHRASE_PARAM=/boardlog/gate-phrase
 BOARDLOG_ALLOWED_BOARDS=tension
 BOARDLOG_MAX_SYNC_PAGES=100
+BOARDLOG_SESSION_TTL_SECONDS=43200
 ```
 
 (The allowed CORS origin is set on the Function URL via the `allowed_origin`

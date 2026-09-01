@@ -4,7 +4,7 @@ const config = window.BOARDLOG_CONFIG || {};
 const local = window.BOARDLOG_LOCAL || {};
 const IS_LOCAL = ["localhost", "127.0.0.1", "[::1]", ""].includes(location.hostname);
 const state = {
-  gate: "",
+  session: "",
   rows: [],
   sessions: [],
   gradeOrder: [],
@@ -26,9 +26,8 @@ function setStatus(message, tone = "muted") {
   status.style.color = tone === "error" ? "#8a1f11" : tone === "good" ? "#0f766e" : "";
 }
 
+// The backend URL ships in site.config.js; it is public, not a secret.
 function currentEndpoint() {
-  const typed = $("endpointInput").value.trim();
-  if (typed) return typed;
   // On localhost, don't silently fall back to the production Function URL — a
   // cross-origin call to it just CORS-fails. Use a local override only if one
   // was supplied; otherwise run backend-free (gate opens, CSV still works).
@@ -36,10 +35,17 @@ function currentEndpoint() {
   return (config.defaultEndpoint || "").trim();
 }
 
-// The Function URL is public; the gate phrase and access key are sent as
-// headers and verified server-side by the Lambda. The page keeps both secrets
-// in sessionStorage for the lifetime of the tab (cleared by Lock) so a
-// refresh doesn't force re-entry; nothing is persisted beyond the tab.
+// The Function URL is public. The knock (gate phrase) is sent once, as a
+// header, and verified server-side by the Lambda, which answers with a
+// short-lived session token. Only that token is kept — in sessionStorage for
+// the lifetime of the tab, cleared by Lock — so a refresh doesn't force
+// re-entry. The page never stores the phrase and never sees the backend
+// access key at all.
+const SESSION_STORAGE_KEY = "boardlog:session";
+const KNOCK_PLACEHOLDER = "say the quiet part";
+
+class SessionExpiredError extends Error {}
+
 async function callBackend(endpoint, bodyObj, extraHeaders = {}) {
   return fetch(endpoint, {
     method: "POST",
@@ -48,49 +54,78 @@ async function callBackend(endpoint, bodyObj, extraHeaders = {}) {
   });
 }
 
+// Ask the backend to verify the knock. Resolves to a session token, or "" when
+// there is no backend to talk to (CSV-only use, or backend-free local dev).
 async function verifyGate(phrase) {
   const endpoint = currentEndpoint();
   // CSV-only use has no backend and nothing to protect, so open the door locally.
-  if (!endpoint) return;
+  if (!endpoint) return "";
   try {
     const response = await callBackend(endpoint, { action: "unlock" }, { "X-Board-Gate": phrase });
     if (response.status === 403) throw new Error("The door stays shut.");
     if (!response.ok) throw new Error(`Gate check failed (HTTP ${response.status}).`);
+    const payload = await response.json().catch(() => ({}));
+    return typeof payload.session === "string" ? payload.session : "";
   } catch (error) {
     // From localhost the Function URL is cross-origin and the browser blocks the
     // response (CORS) — fetch rejects with a TypeError before we see a status.
     // That is expected in local dev, so open the door instead of trapping the
     // tester at the gate. A genuine 403 (handled above) still throws in prod.
-    if (IS_LOCAL && error instanceof TypeError) return;
+    if (IS_LOCAL && error instanceof TypeError) return "";
     throw error;
   }
 }
 
-async function unlock(phrase) {
-  await verifyGate(phrase);
-  state.gate = phrase;
-  sessionStorage.setItem("boardlog:gate", phrase);
+// Tokens are "<unix expiry>.<signature>". The expiry is readable so the page
+// can drop a stale token without a round trip; only the backend checks the
+// signature.
+function sessionExpiresAt(token) {
+  const seconds = Number.parseInt(String(token || "").split(".")[0], 10);
+  return Number.isFinite(seconds) ? seconds * 1000 : 0;
+}
+
+function sessionIsLive(token) {
+  return Boolean(token) && sessionExpiresAt(token) > Date.now();
+}
+
+function enterRoom() {
   $("gate").classList.add("is-hidden");
   $("app").classList.remove("is-hidden");
 }
 
+async function unlock(phrase) {
+  const token = await verifyGate(phrase);
+  state.session = token;
+  if (token) sessionStorage.setItem(SESSION_STORAGE_KEY, token);
+  else sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  // The phrase has done its job; don't leave it one "Show" click away.
+  $("knockInput").value = "";
+  $("knockInput").placeholder = KNOCK_PLACEHOLDER;
+  enterRoom();
+}
+
 function lock() {
-  state.gate = "";
-  sessionStorage.removeItem("boardlog:gate");
-  sessionStorage.removeItem("boardlog:key");
+  state.session = "";
+  sessionStorage.removeItem(SESSION_STORAGE_KEY);
   $("app").classList.add("is-hidden");
   $("gate").classList.remove("is-hidden");
   // Reset the app layout so the next unlock starts at the fetch form.
   $("connect").classList.remove("is-hidden");
   $("dashboard").classList.add("is-hidden");
   $("knockInput").value = "";
-  // Clear the secrets from the DOM too, or they stay one "Show" click away,
+  $("knockInput").placeholder = KNOCK_PLACEHOLDER;
+  // Clear the password from the DOM too, or it stays one "Show" click away,
   // and return any revealed field to dots.
-  $("accessKeyInput").value = "";
   $("passwordInput").value = "";
-  hideSecret($("accessKeyInput"));
   hideSecret($("passwordInput"));
   hideSecret($("knockInput"));
+}
+
+// The backend refused the session (it expired, or a secret was rotated). Send
+// the user back to the gate with a hint rather than a dead-end error.
+function expireSession() {
+  lock();
+  $("knockInput").placeholder = "session expired — knock again";
 }
 
 function parseCsv(text) {
@@ -678,10 +713,14 @@ $("apiForm").addEventListener("submit", async (event) => {
   if (exportInFlight) return;
   const endpoint = currentEndpoint();
   if (!endpoint) {
-    setStatus("Add a private export endpoint first.", "error");
+    setStatus("No backend is configured for this page; load a CSV file instead.", "error");
     return;
   }
-  const accessKey = $("accessKeyInput").value.trim();
+  if (!sessionIsLive(state.session)) {
+    setStatus("Session expired. Knock again to continue.", "error");
+    expireSession();
+    return;
+  }
   const submitButton = $("apiForm").querySelector('button[type="submit"]');
   const submitLabel = submitButton && submitButton.querySelector(".btn-label");
   exportInFlight = true;
@@ -705,17 +744,15 @@ $("apiForm").addEventListener("submit", async (event) => {
         username: $("usernameInput").value.trim(),
         password: $("passwordInput").value,
       },
-      { "X-Board-Gate": state.gate, "X-Board-Room-Key": accessKey },
+      { "X-Board-Session": state.session },
     );
     if (response.status === 403) {
-      throw new Error("Backend rejected the gate phrase or access key (403).");
+      throw new SessionExpiredError("Session expired. Knock again to continue.");
     }
     if (response.status === 401) {
       throw new Error("Board login failed; check your username and password.");
     }
     if (!response.ok) throw new Error(`Export failed with HTTP ${response.status}`);
-    // Only remember the key once the backend has accepted it.
-    sessionStorage.setItem("boardlog:key", accessKey);
     const payload = await response.json();
     loadJsonPayload(payload, "remote storage");
     // Clear the password only after a successful load. On failure, keep it so
@@ -723,6 +760,7 @@ $("apiForm").addEventListener("submit", async (event) => {
     $("passwordInput").value = "";
   } catch (error) {
     setStatus(error.message, "error");
+    if (error instanceof SessionExpiredError) expireSession();
   } finally {
     clearInterval(ticker);
     // Whatever happened, return the password field to dots (it may have been
@@ -846,31 +884,16 @@ $("copyLog").addEventListener("click", async () => {
   }, 1200);
 });
 
-// Prefill the endpoint: a local override on localhost, the shipped default in
-// production. Leaving it blank locally keeps the page from calling production.
-const prefillEndpoint = IS_LOCAL ? local.endpoint : config.defaultEndpoint;
-if (prefillEndpoint) {
-  $("endpointInput").value = prefillEndpoint;
-}
-
-// Prefill the gate phrase (a cached one from this tab, or the .env knock in
-// local dev) so a returning visitor only presses Enter. We deliberately do NOT
-// auto-unlock below: entering the room is always an explicit action.
-const cachedGate = sessionStorage.getItem("boardlog:gate");
-if (cachedGate) {
-  $("knockInput").value = cachedGate;
-} else if (IS_LOCAL && local.knock) {
-  $("knockInput").value = local.knock;
-}
-
-const storedKey = sessionStorage.getItem("boardlog:key");
-if (storedKey) {
-  $("accessKeyInput").value = storedKey;
+// A refresh resumes the tab's session: the backend already verified the knock
+// for this token, and sessionStorage dies with the tab. Otherwise show the
+// gate, prefilling the .env knock in local dev so a tester only presses Enter.
+const storedSession = sessionStorage.getItem(SESSION_STORAGE_KEY) || "";
+if (sessionIsLive(storedSession)) {
+  state.session = storedSession;
+  enterRoom();
 } else {
-  // First visit (no remembered key): open Room Access so the endpoint and key
-  // fields are visible. Once a key sticks, this stays collapsed and the user
-  // just types username/password.
-  $("roomAccess").open = true;
+  sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  if (IS_LOCAL && local.knock) $("knockInput").value = local.knock;
 }
 
 // Add a show/hide toggle to every password field.

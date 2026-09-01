@@ -45,6 +45,12 @@ variable "gate_phrase_param_name" {
   default     = "/boardlog/gate-phrase"
 }
 
+variable "session_ttl_seconds" {
+  description = "Lifetime of the session token a correct gate phrase earns (the page's login). Rotating either secret revokes all sessions early."
+  type        = number
+  default     = 43200
+}
+
 variable "allowed_boards" {
   description = "Comma-separated list of board names the backend will allow."
   type        = string

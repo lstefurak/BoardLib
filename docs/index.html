@@ -51,26 +51,6 @@
               <input id="passwordInput" name="password" type="password" autocomplete="current-password" placeholder="board account password">
             </div>
 
-            <details class="room-access" id="roomAccess">
-              <summary>
-                <span class="summary-text">
-                  <span class="summary-label">Room access</span>
-                  <span class="summary-hint">Function URL &amp; access key</span>
-                </span>
-                <span class="chev" aria-hidden="true"></span>
-              </summary>
-              <div class="room-access-body">
-                <div class="field">
-                  <label for="endpointInput">Function URL</label>
-                  <input id="endpointInput" name="endpoint" type="url" placeholder="https://abc.lambda-url.region.on.aws/">
-                </div>
-                <div class="field has-reveal">
-                  <label for="accessKeyInput">Access key</label>
-                  <input id="accessKeyInput" name="accessKey" type="password" autocomplete="off" placeholder="backend access key">
-                </div>
-              </div>
-            </details>
-
             <button class="primary" type="submit">
               <span class="btn-spinner" aria-hidden="true"></span>
               <span class="btn-label">Fetch Logs</span>

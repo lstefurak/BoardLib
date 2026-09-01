@@ -15,15 +15,18 @@ This Terraform creates the AWS side of the BoardLog app:
 There are **two independent secrets**, each stored as an **SSM SecureString**
 (KMS-encrypted) and verified server-side by the Lambda:
 
-| Secret        | Header sent by the page | Default SSM parameter   | Purpose                          |
-| ------------- | ----------------------- | ----------------------- | -------------------------------- |
-| Gate phrase   | `X-Board-Gate`          | `/boardlog/gate-phrase` | Unlocks the page UI (the "knock")|
-| Access key    | `X-Board-Room-Key`      | `/boardlog/access-key`  | Authorizes the export request    |
+| Secret        | Header             | Default SSM parameter   | Purpose                                              |
+| ------------- | ------------------ | ----------------------- | ---------------------------------------------------- |
+| Gate phrase   | `X-Board-Gate`     | `/boardlog/gate-phrase` | The user's whole login (the "knock"); earns a session |
+| Access key    | `X-Board-Room-Key` | `/boardlog/access-key`  | Script exports; co-signs session tokens              |
 
-Neither secret is stored in the static site or in terraform state. The user
-types them at runtime; the Lambda reads them from SSM at request time. Because
-they are separate parameters, you can **rotate either one independently**
-without redeploying or touching the other.
+The user only ever types the gate phrase. A correct knock returns a session
+token (sent back as `X-Board-Session`, valid for `session_ttl_seconds`, default
+12 hours) that the page presents on exports, so the page never handles the
+access key. Neither secret is stored in the static site or in terraform state;
+the Lambda reads them from SSM at request time. Because they are separate
+parameters, you can **rotate either one independently** without redeploying —
+and rotating either one revokes every outstanding session.
 
 ## 1. Build the Lambda Zip
 

@@ -93,12 +93,13 @@ resource "aws_lambda_function" "boardlog" {
     variables = {
       # CORS (allowed origin) is configured on the Function URL below, not read
       # by the handler — so ALLOWED_ORIGIN is intentionally not passed here.
-      BOARDLOG_ACCESS_KEY_PARAM  = var.access_key_param_name
-      BOARDLOG_GATE_PHRASE_PARAM = var.gate_phrase_param_name
-      BOARDLOG_ALLOWED_BOARDS    = var.allowed_boards
-      BOARDLOG_MAX_SYNC_PAGES    = tostring(var.max_sync_pages)
-      BOARDLOG_CACHE_DIR         = "/tmp/boardlog"
-      PYTHONPATH                 = "/var/task"
+      BOARDLOG_ACCESS_KEY_PARAM    = var.access_key_param_name
+      BOARDLOG_GATE_PHRASE_PARAM   = var.gate_phrase_param_name
+      BOARDLOG_ALLOWED_BOARDS      = var.allowed_boards
+      BOARDLOG_MAX_SYNC_PAGES      = tostring(var.max_sync_pages)
+      BOARDLOG_SESSION_TTL_SECONDS = tostring(var.session_ttl_seconds)
+      BOARDLOG_CACHE_DIR           = "/tmp/boardlog"
+      PYTHONPATH                   = "/var/task"
     }
   }
 
@@ -114,7 +115,7 @@ resource "aws_lambda_function_url" "boardlog" {
 
   cors {
     allow_credentials = false
-    allow_headers     = ["content-type", "x-board-room-key", "x-board-gate"]
+    allow_headers     = ["content-type", "x-board-gate", "x-board-session", "x-board-room-key"]
     allow_methods     = ["POST"]
     allow_origins     = [var.allowed_origin]
     max_age           = 300
@@ -123,8 +124,9 @@ resource "aws_lambda_function_url" "boardlog" {
 
 # A public Function URL (authorization_type = NONE) requires an explicit
 # resource policy granting lambda:InvokeFunctionUrl to principal "*". The page
-# is open to anyone, but the handler still requires the gate phrase AND access
-# key (verified server-side) before doing any work.
+# is open to anyone, but the handler still requires a session token (issued only
+# for the correct gate phrase) or the gate phrase AND access key, all verified
+# server-side, before doing any work.
 #
 # NOTE: changes to the URL auth type or this permission can take a few minutes
 # to propagate to the Lambda edge. A transient 403 right after an apply is
