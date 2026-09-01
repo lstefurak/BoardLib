@@ -174,6 +174,19 @@ This will fetch all of the images for the given board and place them in `output_
 
 All [Aurora Climbing](https://auroraclimbing.com/) based boards (Kilter, Tension, etc.).
 
+### Instagram video planning
+
+An experimental, local-only tool can inventory an unpacked Google Photos
+Takeout, match video timestamps to a BoardLib logbook CSV, and generate a
+human-reviewable caption manifest. It does not upload or post media:
+
+```sh
+python tools/instagram_board_publisher.py /path/to/Takeout/Google\ Photos \
+  --logbook data/tension-logbook.csv --output data/instagram-manifest.jsonl
+```
+
+See [the research, privacy notes, and proposed publishing phases](specs/instagram-publisher/research.md).
+
 ## Bugs 🐞 and Feature Requests 🗒️
 
 Please create an issue in the [issue tracker](https://github.com/lemeryfertitta/BoardLib/issues) to report bugs or request additional features. Contributions are welcome and appreciated.
