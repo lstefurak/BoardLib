@@ -23,7 +23,9 @@ user types nothing but the gate phrase. Tokens are HMAC-signed with a key
 derived from both secrets and expire after `BOARDLOG_SESSION_TTL_SECONDS`
 (default 43200 = 12 hours); rotating either secret revokes all of them. The
 export path requires either a live session token or `X-Board-Gate` **and**
-`X-Board-Room-Key`.
+`X-Board-Room-Key`. Session tokens are only minted or accepted when **both**
+secrets are configured, in every runtime; a run with only one secret set still
+enforces that secret on the header path.
 
 Body:
 
