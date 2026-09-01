@@ -44,14 +44,20 @@ python tools/instagram_board_publisher.py \
   /path/to/unpacked/Takeout/Google\ Photos \
   --logbook data/tension-logbook.csv \
   --output data/instagram-manifest.jsonl \
+  --logbook-tz America/New_York \
   --tolerance-minutes 180
 ```
 
-Each record starts with `status: needs_review`. A missing sidecar is called out
-because file modification time is weaker evidence than Google capture time. The
-nearest log is accepted only inside the configured window. Review timezone
-offsets carefully: old BoardLib CSV timestamps may be timezone-naive, and this
-tool currently treats those as UTC.
+Each record starts with `status: needs_review`. Matching prefers a climb named
+in the clip's Google Photos description (same day, or the day either side),
+then the nearest timed log entry inside the configured window; anything else is
+left unmatched with the day's climbs listed under `same_day_climbs` so the
+reviewer can name the right one in the description and re-run. A missing
+sidecar is called out because file modification time is weaker evidence than
+Google capture time. BoardLib exports logbook timestamps as timezone-naive
+local times while Takeout timestamps are UTC, so always pass `--logbook-tz`
+(an IANA name, or `local`); without it every match is off by your UTC offset.
+Entries exported with no time of day (midnight) are never matched by time.
 
 ## Proposed publishing phases
 
