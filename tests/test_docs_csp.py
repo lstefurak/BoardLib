@@ -18,11 +18,15 @@ def test_csp_allows_lambda_function_urls_in_any_region():
     assert "connect-src https://*.lambda-url.us-east-1.on.aws" not in html
 
 
-def test_endpoint_placeholder_is_region_neutral():
+def test_page_ships_endpoint_from_config_not_a_form_field():
+    # The Function URL comes from site.config.js (or the local-dev override);
+    # there is no endpoint input for the user to fill in.
     html = DOCS_INDEX.read_text(encoding="utf-8")
+    js = DOCS_APP.read_text(encoding="utf-8")
 
-    assert "https://abc.lambda-url.region.on.aws/" in html
-    assert "placeholder=\"https://abc.lambda-url.us-east-1.on.aws/\"" not in html
+    assert "endpointInput" not in html
+    assert "endpointInput" not in js
+    assert "config.defaultEndpoint" in js
 
 
 def test_docs_keep_csp_safe_script_surface():
@@ -59,25 +63,27 @@ def test_credential_form_leads_with_username_and_password():
     assert api_form is not None
 
     inputs = {input_tag.get("id"): input_tag for input_tag in api_form.find_all("input")}
-    # Username and password lead; the Function URL and access key live in the
-    # collapsible Room Access panel within the same card.
-    assert set(inputs) == {"usernameInput", "passwordInput", "endpointInput", "accessKeyInput"}
+    # The board credentials are the only fields, so password keepers see one
+    # clean username/password pair.
+    assert set(inputs) == {"usernameInput", "passwordInput"}
     assert inputs["usernameInput"].get("autocomplete") == "username"
     assert inputs["passwordInput"].get("autocomplete") == "current-password"
-    # The access key is not a board credential, so keep it out of autofill.
-    assert inputs["accessKeyInput"].get("autocomplete") == "off"
 
 
-def test_room_access_is_collapsed_by_default():
+def test_page_only_ever_holds_a_session_token():
+    # One knock is the whole login. The page exchanges it for a session token
+    # and never stores the gate phrase or handles the backend access key.
     html = DOCS_INDEX.read_text(encoding="utf-8")
-    soup = BeautifulSoup(html, "html.parser")
+    js = DOCS_APP.read_text(encoding="utf-8")
 
-    room_access = soup.find("details", id="roomAccess")
-    assert room_access is not None
-    # Collapsed in markup; app.js opens it only on first visit (no saved key).
-    assert not room_access.has_attr("open")
-    body = room_access.find_all("input")
-    assert {tag.get("id") for tag in body} == {"endpointInput", "accessKeyInput"}
+    assert "accessKeyInput" not in html
+    assert "roomAccess" not in html
+    assert "X-Board-Session" in js
+    assert "X-Board-Room-Key" not in js
+    assert "boardlog:gate" not in js
+    assert "boardlog:key" not in js
+    # The knock is sent to the backend exactly once, at the gate.
+    assert js.count('"X-Board-Gate"') == 1
 
 
 def test_localhost_dev_path_does_not_call_production():

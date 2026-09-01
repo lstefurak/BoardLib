@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import unittest
 import unittest.mock
 
@@ -14,6 +15,7 @@ class TestBoardLogLambda(unittest.TestCase):
             "BOARDLOG_ACCESS_KEY_PARAM",
             "BOARDLOG_GATE_PHRASE_PARAM",
             "BOARDLOG_ALLOWED_BOARDS",
+            "BOARDLOG_SESSION_TTL_SECONDS",
             "AWS_LAMBDA_FUNCTION_NAME",
         ):
             os.environ.pop(name, None)
@@ -168,6 +170,120 @@ class TestBoardLogLambda(unittest.TestCase):
                 None,
             )
         self.assertEqual(response["statusCode"], 200)
+
+    # --- Session tokens: one knock is the page's whole login ---
+
+    def configure_secrets(self):
+        os.environ["BOARDLOG_GATE_PHRASE"] = "open sesame"
+        os.environ["BOARDLOG_ACCESS_KEY"] = "secret"
+
+    def unlock(self, phrase="open sesame"):
+        response = handler.lambda_handler(
+            self.event({"action": "unlock"}, headers={"X-Board-Gate": phrase}), None
+        )
+        return response, json.loads(response["body"])
+
+    def export_with_session(self, token):
+        return handler.lambda_handler(
+            self.event(
+                {"board": "tension", "username": "u", "password": "p"},
+                headers={"X-Board-Session": token},
+            ),
+            None,
+        )
+
+    def test_unlock_issues_a_session_token(self):
+        self.configure_secrets()
+        response, payload = self.unlock()
+        self.assertEqual(response["statusCode"], 200)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(handler.verify_session(payload["session"]))
+        # The expiry is readable from the token itself so the page can tell a
+        # stale token apart without a round trip.
+        self.assertEqual(int(payload["session"].split(".")[0]), payload["expires_at"])
+        self.assertAlmostEqual(
+            payload["expires_at"], time.time() + handler.DEFAULT_SESSION_TTL_SECONDS, delta=5
+        )
+
+    def test_wrong_knock_gets_no_session(self):
+        self.configure_secrets()
+        response, payload = self.unlock("nope")
+        self.assertEqual(response["statusCode"], 403)
+        self.assertNotIn("session", payload)
+
+    @unittest.mock.patch("backend.boardlog_lambda.handler.export_logbook")
+    def test_export_accepts_a_session_token_alone(self, mock_export):
+        self.configure_secrets()
+        mock_export.return_value = []
+        _, payload = self.unlock()
+        response = self.export_with_session(payload["session"])
+        self.assertEqual(response["statusCode"], 200)
+        mock_export.assert_called_once_with("tension", "u", "p")
+
+    def test_export_rejects_forged_and_expired_sessions(self):
+        self.configure_secrets()
+        _, payload = self.unlock()
+        expiry, signature = payload["session"].split(".")
+        flipped = ("0" if signature[0] != "0" else "1") + signature[1:]
+        expired = int(time.time()) - 1
+        for token in (
+            "",
+            "garbage",
+            f"{expiry}.",
+            f"{expiry}.{flipped}",
+            # Pushing the expiry out without re-signing must fail.
+            f"{int(expiry) + 3600}.{signature}",
+            # A correctly signed but already-expired token must fail.
+            f"{expired}.{handler.sign_session(expired)}",
+        ):
+            with self.subTest(token=token):
+                self.assertEqual(self.export_with_session(token)["statusCode"], 403)
+
+    def test_rotating_either_secret_revokes_sessions(self):
+        self.configure_secrets()
+        _, payload = self.unlock()
+        token = payload["session"]
+        self.assertTrue(handler.verify_session(token))
+
+        os.environ["BOARDLOG_GATE_PHRASE"] = "new knock"
+        self.assertFalse(handler.verify_session(token))
+
+        os.environ["BOARDLOG_GATE_PHRASE"] = "open sesame"
+        os.environ["BOARDLOG_ACCESS_KEY"] = "rotated"
+        self.assertFalse(handler.verify_session(token))
+
+    def test_sessions_fail_closed_in_lambda_without_both_secrets(self):
+        os.environ["AWS_LAMBDA_FUNCTION_NAME"] = "boardlog"
+        os.environ["BOARDLOG_GATE_PHRASE"] = "open sesame"  # access key missing
+        response, payload = self.unlock()
+        # The gate itself still verifies, but no session can be minted...
+        self.assertEqual(response["statusCode"], 200)
+        self.assertNotIn("session", payload)
+        # ...and nothing verifies either.
+        self.assertFalse(handler.verify_session(f"{int(time.time()) + 60}.abc"))
+
+    def test_session_ttl_is_configurable(self):
+        self.configure_secrets()
+        os.environ["BOARDLOG_SESSION_TTL_SECONDS"] = "60"
+        _, payload = self.unlock()
+        self.assertAlmostEqual(payload["expires_at"], time.time() + 60, delta=5)
+
+        os.environ["BOARDLOG_SESSION_TTL_SECONDS"] = "not-a-number"
+        _, payload = self.unlock()
+        self.assertAlmostEqual(
+            payload["expires_at"], time.time() + handler.DEFAULT_SESSION_TTL_SECONDS, delta=5
+        )
+
+    def test_export_log_line_names_the_auth_mechanism_but_not_the_token(self):
+        self.configure_secrets()
+        _, payload = self.unlock()
+        with unittest.mock.patch("backend.boardlog_lambda.handler.export_logbook", return_value=[]):
+            with unittest.mock.patch("builtins.print") as mock_print:
+                self.export_with_session(payload["session"])
+        printed = [str(call.args[0]) for call in mock_print.call_args_list if call.args]
+        logged = [json.loads(line) for line in printed if line.startswith("{")]
+        self.assertEqual(logged[-1]["auth"], "session")
+        self.assertNotIn(payload["session"], "\n".join(printed))
 
 
 if __name__ == "__main__":

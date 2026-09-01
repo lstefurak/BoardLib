@@ -9,13 +9,21 @@ This backend is designed for an AWS Lambda Function URL. The GitHub Pages UI sen
 Headers:
 
 - `Content-Type: application/json`
-- `X-Board-Gate: <gate phrase>` if a gate phrase is configured
-- `X-Board-Room-Key: <access key>` if an access key is configured
+- `X-Board-Gate: <gate phrase>` — for the unlock action (and, with the access
+  key, for script exports)
+- `X-Board-Session: <session token>` — for exports from the page
+- `X-Board-Room-Key: <access key>` — alternative for exports, together with
+  `X-Board-Gate`
 
 Both secrets are independent and verified server-side with a constant-time
 compare. A `POST` body of `{"action": "unlock"}` with a valid `X-Board-Gate`
-header returns `{"ok": true}` and is used by the page's gate button; the export
-path additionally requires `X-Board-Room-Key`.
+header returns `{"ok": true, "session": "<expiry>.<hmac>", "expires_at": <unix
+seconds>}`; the page keeps only the token and presents it on exports, so the
+user types nothing but the gate phrase. Tokens are HMAC-signed with a key
+derived from both secrets and expire after `BOARDLOG_SESSION_TTL_SECONDS`
+(default 43200 = 12 hours); rotating either secret revokes all of them. The
+export path requires either a live session token or `X-Board-Gate` **and**
+`X-Board-Room-Key`.
 
 Body:
 
@@ -62,6 +70,7 @@ Body:
 - `BOARDLOG_ACCESS_KEY_PARAM`: SSM SecureString parameter name holding the access key (production). Read at runtime and decrypted.
 - `BOARDLOG_GATE_PHRASE_PARAM`: SSM SecureString parameter name holding the gate phrase (production).
 - `BOARDLOG_ACCESS_KEY` / `BOARDLOG_GATE_PHRASE`: Plaintext fallbacks for local/dev/tests. Take precedence over the SSM parameters when set. Locally, a check is disabled if neither the env var nor the parameter is configured. **In Lambda the same situation fails closed** (every request is refused with 403 and a warning is logged) so a misconfigured deployment can never silently run without authentication.
+- `BOARDLOG_SESSION_TTL_SECONDS`: Optional lifetime of the session token issued by a correct gate phrase. Defaults to `43200` (12 hours).
 - `BOARDLOG_CACHE_DIR`: Optional database cache directory. Defaults to `/tmp/boardlog`.
 - `BOARDLOG_MAX_SYNC_PAGES`: Optional shared database sync page cap. Defaults to `100`.
 - `BOARDLOG_ALLOWED_BOARDS`: Optional comma-separated board names. Defaults to `tension`.

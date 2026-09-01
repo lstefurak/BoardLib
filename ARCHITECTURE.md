@@ -36,11 +36,15 @@ security model holds up.
 
 1. **Unlock.** The user types the gate phrase. The page `POST`s
    `{"action":"unlock"}` with header `X-Board-Gate: <phrase>`. The Lambda
-   compares it (constant-time) to `/boardlog/gate-phrase`. On success the UI
-   reveals; the phrase is kept only in `sessionStorage` for the tab.
-2. **Export.** The user supplies the access key + Tension username/password. The
-   page `POST`s them with `X-Board-Gate` **and** `X-Board-Room-Key`. The Lambda
-   verifies both secrets, then logs in to Tension and returns rows.
+   compares it (constant-time) to `/boardlog/gate-phrase` and, on success,
+   answers with a **session token** — `<expiry>.<HMAC>`, signed with a key
+   derived from both secrets, valid for 12 hours by default. The UI reveals;
+   only the token is kept, in `sessionStorage` for the tab. The phrase is never
+   stored, and the page never sees the access key.
+2. **Export.** The user supplies Tension username/password. The page `POST`s
+   them with `X-Board-Session: <token>`. The Lambda verifies the token
+   (signature and expiry), then logs in to Tension and returns rows. Scripts can
+   instead send `X-Board-Gate` **and** `X-Board-Room-Key` together.
 3. **Render.** The browser charts the session entirely client-side.
 
 ## Why this is secure
@@ -53,19 +57,21 @@ public cannot read.**
 
 | Threat | Control |
 | --- | --- |
-| Someone reads the public JS to extract a secret | There are **no secrets in the page**. The gate phrase and access key exist only in the user's memory and in SSM. Client-side "encryption" is intentionally not used because it can't protect a secret the client must also be able to read. |
-| Stranger discovers the Function URL and calls it | The handler requires a valid `X-Board-Room-Key`, checked server-side, before doing any work. CORS additionally restricts *browsers* to the GitHub Pages origin. |
+| Someone reads the public JS to extract a secret | There are **no secrets in the page**. The gate phrase and access key exist only in the user's memory and in SSM; the page holds at most a short-lived session token. Shipping the access key client-side "encrypted" under the gate phrase is intentionally not done: it can't protect a secret the client must also be able to read, and it would let anyone brute-force the gate phrase offline against the ciphertext instead of through the rate-limited, alarmed Lambda. |
+| Stranger discovers the Function URL and calls it | The handler requires a valid session token (only ever issued for the correct gate phrase) or a valid `X-Board-Gate` + `X-Board-Room-Key` pair, checked server-side, before doing any work. CORS additionally restricts *browsers* to the GitHub Pages origin. |
+| A session token leaks from a browser | Tokens expire (12 hours by default, `BOARDLOG_SESSION_TTL_SECONDS`), are HMAC-signed with a key derived from both secrets so they cannot be forged or extended, and are revoked wholesale by rotating either secret. |
 | Casual visitor pokes at the page UI | The gate phrase is verified by the Lambda, so the "door" is a real server check, not a cosmetic toggle that DevTools can flip. |
 | Timing attack to guess a secret byte-by-byte | Comparisons use `hmac.compare_digest` (constant-time). |
 | Secret leaks via infrastructure-as-code | Secrets are SSM SecureStrings created out-of-band, so their plaintext never enters terraform state, the repo, or the Lambda console env vars. They are encrypted at rest with KMS and decrypted only in the Lambda's memory at request time. |
-| One secret is compromised | The two secrets are **independent parameters**. Rotating one (`aws ssm put-parameter --overwrite`) does not affect the other and needs no redeploy. |
+| One secret is compromised | The two secrets are **independent parameters**. Rotating one (`aws ssm put-parameter --overwrite`) does not affect the other and needs no redeploy; it also invalidates every outstanding session token. |
 | Password theft | The Tension password is forwarded to Tension for a single request and never persisted; request-body logging is disabled by convention. The real data authority is Tension's own auth. |
-| Abuse / cost / DoS on the public endpoint | Function URL with restrictive CORS plus the required access key; concurrency is capped via `reserved_concurrency` in terraform (default 5), with CloudWatch alarms on throttles and sustained 403s. |
+| Abuse / cost / DoS on the public endpoint | Function URL with restrictive CORS plus the required session token or access key; concurrency is capped via `reserved_concurrency` in terraform (default 5), with CloudWatch alarms on throttles and sustained 403s. |
 
 ### Trust boundaries
 
 - **Browser → Lambda:** untrusted input. Everything is re-validated server-side
-  (method, JSON shape, both secrets, board allow-list, credential presence).
+  (method, JSON shape, session token or both secrets, board allow-list,
+  credential presence).
 - **Lambda → SSM/KMS:** authorized by a narrowly scoped IAM policy that grants
   `ssm:GetParameter` on exactly the two parameter ARNs and `kms:Decrypt` on the
   SSM-managed key — nothing more.
@@ -97,6 +103,8 @@ was caused by mistaking that delay for an account-level block.)
 - **Hide the data from the user.** The user authenticates to Tension with their
   own credentials and only ever retrieves their own logbook.
 - **Treat the gate phrase as strong cryptographic auth.** It is a real
-  server-checked gate, but it travels as a header over TLS and is meant as a
-  lightweight "who knows the knock" layer in front of the access key, not as the
-  sole protection.
+  server-checked gate and, because it alone earns a session token, it is the
+  user-facing login — so pick a long phrase. It is only ever checked online by
+  the Lambda (capped concurrency, alarmed 403s), never against anything an
+  attacker could grind through offline. The real protection for the data
+  remains the user's own Tension credentials.
