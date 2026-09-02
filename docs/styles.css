@@ -679,14 +679,36 @@ button.primary.is-busy .btn-spinner {
 
 .climb-controls {
   display: grid;
-  grid-template-columns: minmax(180px, 260px) 1fr auto auto;
-  gap: 10px;
+  grid-template-columns: minmax(180px, 260px) 1fr auto;
+  gap: 12px 10px;
   align-items: center;
 }
 
-.climb-controls select {
-  width: auto;
-  min-width: 150px;
+.climb-controls .toggle {
+  justify-self: end;
+}
+
+/* Angle multi-select: a labelled chip row spanning the full width. */
+.angle-filter {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.filter-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.chip:focus-visible,
+.toggle:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .chips {
@@ -711,27 +733,6 @@ button.primary.is-busy .btn-spinner {
   color: white;
 }
 
-.toggle-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  white-space: nowrap;
-}
-
-.sort-direction {
-  min-height: 34px;
-  padding: 0 12px;
-  background: white;
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.sort-direction.is-active {
-  background: var(--ink);
-  color: white;
-}
-
 .toggle {
   display: inline-flex;
   grid-auto-flow: column;
@@ -753,8 +754,35 @@ button.primary.is-busy .btn-spinner {
   accent-color: var(--accent);
 }
 
-.climb-count {
+/* Count on the left, angle-chip legend on the right, both as table notes. */
+.table-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 20px;
   margin-top: -10px;
+}
+
+.chip-legend {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  font-size: 12px;
+}
+
+.legend-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .climb-history {
@@ -765,6 +793,126 @@ button.primary.is-busy .btn-spinner {
   position: sticky;
   top: 0;
   z-index: 1;
+  padding: 8px;
+  vertical-align: bottom;
+}
+
+/* Sortable column headers. The whole label is a button; the active column
+   shows a chevron and a teal rule, and aria-sort carries the same state. */
+.sort-button {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 6px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sort-button:hover {
+  filter: none;
+  color: var(--ink);
+}
+
+.sort-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.th-label {
+  display: inline-block;
+}
+
+/* Eyebrow that groups the two community columns. */
+.th-group {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.sort-arrow {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: 0 2px 6px 0;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  opacity: 0;
+  transition: opacity .15s ease, transform .15s ease;
+}
+
+.sort-button:hover .sort-arrow {
+  opacity: .4;
+}
+
+.climb-history th[aria-sort] {
+  color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.climb-history th[aria-sort] .sort-arrow {
+  opacity: 1;
+}
+
+.climb-history th[aria-sort="ascending"] .sort-arrow {
+  transform: rotate(-135deg);
+  margin-bottom: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sort-arrow {
+    transition: none;
+  }
+}
+
+/* The community group sits behind a hairline so it reads as its own block. */
+.climb-history .is-community-start {
+  border-left: 1px solid var(--line);
+}
+
+/* Community quality on the app's 1-3 star scale: a grey track of three stars
+   with an amber copy clipped to the fraction, then the number. */
+.stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.stars-track {
+  position: relative;
+  display: inline-block;
+  color: #dfe5e2;
+  font-size: 13px;
+  line-height: 1;
+  letter-spacing: 1px;
+}
+
+.stars-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--accent-2);
+}
+
+.stars-value {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .climb-row {
@@ -819,56 +967,77 @@ button.primary.is-busy .btn-spinner {
   color: #075985;
 }
 
+.climb-tries {
+  white-space: nowrap;
+}
+
 .tries-total {
   color: var(--muted);
   font-size: 12px;
 }
 
+/* Angle chips, one per angle of a climb. Teal fill = sent at that angle,
+   dashed outline = project. The check inside is the Tension app's own mark
+   (see .check-mark). A chip dims when its angle is outside the angle filter. */
 .angle-variants {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-  min-width: 138px;
+  min-width: 150px;
 }
 
 .angle-chip {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  min-height: 26px;
+  min-height: 24px;
   padding: 0 8px;
-  border: 1px solid var(--line);
+  border: 1px dashed #b7c1bd;
   border-radius: 999px;
-  background: #f4f6f5;
+  background: white;
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .angle-chip.is-sent {
-  border-color: rgba(15, 118, 110, .35);
+  border: 1px solid rgba(15, 118, 110, .35);
   background: var(--soft);
   color: var(--accent);
 }
 
-.variant-icon {
-  flex: none;
-  width: 13px;
-  height: 13px;
-  border: 1px solid currentColor;
-  border-radius: 50%;
-  background: currentColor;
+.angle-chip.is-dimmed {
+  opacity: .38;
 }
 
-.variant-icon.is-mirror {
-  background: linear-gradient(90deg, currentColor 0 50%, transparent 50% 100%);
+/* Two-stroke check: the short "\" is a send in the original orientation, the
+   long "/" a mirrored send, both a climb sent both ways. A faint stroke was
+   tried but not sent; a hidden stroke was never tried. */
+.check-mark {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.check-mark .is-ghost {
+  opacity: .32;
+}
+
+.check-mark .is-off {
+  display: none;
 }
 
 /* Loaded data may predate the community-stats columns; app.js adds
-   .no-community to hide the (last) column instead of a dash-filled one. */
-.no-community th:nth-child(9),
-.no-community td:nth-child(9) {
+   .no-community to hide both community columns instead of dash-filled ones. */
+.no-community .is-community {
   display: none;
 }
 
@@ -919,14 +1088,13 @@ button.primary.is-busy .btn-spinner {
     grid-template-columns: 1fr;
   }
 
-  .climb-controls select {
-    width: 100%;
+  .climb-controls .toggle {
+    justify-self: start;
   }
 
-  .toggle-group {
-    align-items: stretch;
-    flex-wrap: wrap;
-    white-space: normal;
+  .table-meta {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .attempt-line {

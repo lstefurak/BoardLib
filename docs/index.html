@@ -145,38 +145,44 @@
               <button class="chip" type="button" data-filter="flashed">Flashed</button>
               <button class="chip" type="button" data-filter="benchmark">Benchmarks</button>
             </div>
-            <select id="climbSort" aria-label="Sort climbs">
-              <option value="recent">Last climbed</option>
-              <option value="grade">Grade</option>
-              <option value="tries">Most tries</option>
-              <option value="sends">Most sends</option>
-              <option value="name">Name</option>
-              <option value="angle">Angle</option>
-            </select>
-            <div class="toggle-group" aria-label="Climb table options">
-              <button class="sort-direction" id="climbSortDirection" type="button" aria-pressed="false">Reverse</button>
-              <label class="toggle">
-                <input id="climbGroupVariants" type="checkbox" checked>
-                <span>Group variants</span>
-              </label>
+            <label class="toggle">
+              <input id="climbGroupVariants" type="checkbox" checked>
+              <span>Group variants</span>
+            </label>
+            <!-- One toggle chip per angle in the loaded data (app.js fills it in).
+                 "Any" clears the selection; nothing selected means any angle. -->
+            <div class="angle-filter">
+              <span class="filter-label" id="climbAnglesLabel">Angle</span>
+              <div class="chips" id="climbAngles" role="group" aria-labelledby="climbAnglesLabel"></div>
             </div>
           </div>
 
-          <p class="hint climb-count" id="climbCount"></p>
+          <div class="table-meta">
+            <p class="hint climb-count" id="climbCount"></p>
+            <!-- Visual decoder for the angle chips, filled in by app.js from the
+                 same glyph helper the table uses. Every chip carries its own
+                 accessible name, so the legend is hidden from screen readers. -->
+            <p class="hint chip-legend" id="angleLegend" aria-hidden="true"></p>
+          </div>
 
+          <!-- Every header sorts its column (click again to reverse); app.js keeps
+               aria-sort on the active one. The two community columns carry a
+               "Community" eyebrow so they cannot be mistaken for your own sends,
+               and are hidden when the loaded data has no community stats. -->
           <div class="table-wrap climb-history">
             <table id="climbHistoryTable">
               <thead>
                 <tr>
-                  <th>Climb</th>
-                  <th>Grade</th>
-                  <th>Angle</th>
-                  <th>Sends</th>
-                  <th>Tries</th>
-                  <th>Sessions</th>
-                  <th>First send</th>
-                  <th>Last climbed</th>
-                  <th>Community</th>
+                  <th scope="col" data-sort="name"><button class="sort-button" type="button"><span class="th-label">Climb</span><span class="sort-arrow" aria-hidden="true"></span></button></th>
+                  <th scope="col" data-sort="grade"><button class="sort-button" type="button"><span class="th-label">Grade</span><span class="sort-arrow" aria-hidden="true"></span></button></th>
+                  <th scope="col" data-sort="angle"><button class="sort-button" type="button"><span class="th-label">Angle</span><span class="sort-arrow" aria-hidden="true"></span></button></th>
+                  <th scope="col" data-sort="sends"><button class="sort-button" type="button"><span class="th-label">Sends</span><span class="sort-arrow" aria-hidden="true"></span></button></th>
+                  <th scope="col" data-sort="tries"><button class="sort-button" type="button" title="Tries to first send / total tries"><span class="th-label">Tries</span><span class="sort-arrow" aria-hidden="true"></span></button></th>
+                  <th scope="col" data-sort="sessions"><button class="sort-button" type="button"><span class="th-label">Sessions</span><span class="sort-arrow" aria-hidden="true"></span></button></th>
+                  <th scope="col" data-sort="firstSend"><button class="sort-button" type="button"><span class="th-label">First send</span><span class="sort-arrow" aria-hidden="true"></span></button></th>
+                  <th scope="col" data-sort="recent"><button class="sort-button" type="button"><span class="th-label">Last climbed</span><span class="sort-arrow" aria-hidden="true"></span></button></th>
+                  <th scope="col" class="is-community is-community-start" data-sort="communitySends"><button class="sort-button" type="button"><span class="th-label"><span class="th-group">Community</span>Sends</span><span class="sort-arrow" aria-hidden="true"></span></button></th>
+                  <th scope="col" class="is-community" data-sort="quality"><button class="sort-button" type="button"><span class="th-label"><span class="th-group">Community</span>Stars</span><span class="sort-arrow" aria-hidden="true"></span></button></th>
                 </tr>
               </thead>
               <tbody id="climbHistoryRows"></tbody>
