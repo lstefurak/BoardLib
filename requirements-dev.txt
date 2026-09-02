@@ -2,3 +2,5 @@
 -r requirements.txt
 pytest
 python-dotenv
+# tools/instagram_publish.py stages clips in S3 (only needed with --execute).
+boto3

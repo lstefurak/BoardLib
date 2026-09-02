@@ -75,16 +75,31 @@ Entries exported with no time of day (midnight) are never matched by time.
 - Merge AI suggestions with authoritative BoardLib fields.
 - Never infer a grade, send, or climb identity when no log matches.
 
-### Phase 3: approved-only uploader
+### Phase 3 (included): approved-only uploader
 
-- Require `status: approved`, an explicit account ID, and a dry-run default.
-- Upload the video to a private bucket and issue a short-lived fetch URL.
-- Create the Reel container, poll its status, publish it, record the returned
-  media ID, and remove the staged object.
-- Store Meta/OpenAI credentials in environment variables or an OS keychain;
-  never put tokens or signed URLs in the manifest or Git.
-- Add idempotency using a stable hash so reruns cannot duplicate posts, plus a
-  rate limiter and an operator-visible failure log.
+`tools/instagram_publish.py` does exactly this, and nothing more:
+
+- Posts only records with `status: approved`; dry run by default, `--execute`
+  to publish, `--limit N` to post a few at a time.
+- Stages each clip in the private S3 bucket from `infra/terraform/instagram.tf`
+  (public access blocked, encrypted, objects expire after a day as a backstop)
+  and hands Meta a presigned link that lives for an hour.
+- Creates the Reels container, polls `status_code` until `FINISHED` (or fails
+  cleanly on `ERROR` / `EXPIRED` / timeout), publishes, and writes
+  `published_media_id`, `published_at` and `container_id` back into the
+  manifest after every success, so a re-run can never post the same clip twice.
+  Failures are recorded as `last_error` and leave the record `approved`.
+- Deletes the staged object whether or not publishing succeeded.
+- Reads `INSTAGRAM_ACCESS_TOKEN`, `INSTAGRAM_USER_ID` and
+  `INSTAGRAM_STAGING_BUCKET` from the environment or `.env`; the token is never
+  a flag, never logged, never written to the manifest.
+
+Setting up the Meta side (once): switch the Instagram account to a
+professional account, create a Meta developer app with the "Instagram API with
+Instagram Login" product, grant it `instagram_business_basic` and
+`instagram_business_content_publish`, generate a long-lived token for your own
+account, and note the account's Instagram user id. Meta allows 100 API posts
+per account per day.
 
 ## Open decisions before Phase 2/3
 
