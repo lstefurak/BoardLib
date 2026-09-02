@@ -3,7 +3,7 @@
 
 This deliberately stops before publishing.  Instagram's API must fetch a video
 from a public URL, so a human-reviewed manifest is the safe boundary between a
-private photo archive and a later uploader.
+private photo archive and a later uploader (``instagram_publish.py``).
 
 Matching a clip to a logbook entry, in order of preference:
 
@@ -13,6 +13,27 @@ Matching a clip to a logbook entry, in order of preference:
 2. The nearest timed log entry within ``--tolerance-minutes``.
 3. No match.  The record then lists every climb logged that day so the reviewer
    can name the right one in the description and re-run.
+
+Captions follow the convention Tension's beta-video linking recognises:
+
+    "Bring an Axe" V7 @ 30° on the Tension Board.
+    Sent in 3 tries · April 29, 2026
+    (harder side)
+
+    @tensionclimbing #tensionboard #climbing #bouldering
+
+The send line comes from the logbook: a lightning bolt for a flash, tries for a
+single-session send, sessions (plus total tries) when it took longer, and
+"Project" for an attempt that was not a send.  Anything in the Google Photos
+description beyond the climb name/grade/angle is kept as a note.
+
+Statuses set by this tool:
+    ready        matched by the climb name in the description; approve it
+    check_climb  matched by time only (or the description disagrees); confirm
+                 the climb before approving
+    unmatched    no log entry found; name the climb in the description
+Statuses set by you / the uploader: ``approved``, ``skip``, ``published``.
+Records in those three states are carried over untouched when you re-run.
 
 Logbook timestamps exported by BoardLib are timezone-naive local times, while
 Takeout timestamps are UTC, so pass ``--logbook-tz`` (an IANA name such as
@@ -33,6 +54,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".avi", ".webm"}
+DEFAULT_TAGS = "@tensionclimbing #tensionboard #climbing #bouldering"
+DEFAULT_BOARD_LABEL = "Tension Board"
+PLACEHOLDER = "[ADD DESCRIPTION]"
+# Records in these states belong to the reviewer or the uploader; a re-run
+# never regenerates them.
+PRESERVED_STATUSES = {"approved", "skip", "published"}
 
 
 @dataclass(frozen=True)
@@ -43,6 +70,11 @@ class Log:
     angle: str
     board: str
     ascent: bool
+    tries: int = 1
+    tries_total: int = 1
+    sessions: int = 1
+    repeat: bool = False
+    mirror: bool = False
     # Some entries are exported with a date but no time (midnight). They can
     # still be matched by name or listed as same-day candidates, but never by
     # time proximity.
@@ -68,6 +100,17 @@ def parse_datetime(value: str, default_tz: tzinfo = timezone.utc) -> datetime:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=default_tz)
 
 
+def _flag(value: Optional[str]) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes"}
+
+
+def _count(value: Optional[str], default: int = 1) -> int:
+    try:
+        return int(float(value)) if value not in (None, "") else default
+    except ValueError:
+        return default
+
+
 def read_logs(path: Path, logbook_tz: tzinfo = timezone.utc) -> list[Log]:
     with path.open(newline="", encoding="utf-8-sig") as handle:
         rows = csv.DictReader(handle)
@@ -77,6 +120,7 @@ def read_logs(path: Path, logbook_tz: tzinfo = timezone.utc) -> list[Log]:
         logs = []
         for row in rows:
             taken_at = parse_datetime(row["date"], logbook_tz)
+            tries = _count(row.get("tries"))
             logs.append(
                 Log(
                     taken_at=taken_at,
@@ -84,7 +128,12 @@ def read_logs(path: Path, logbook_tz: tzinfo = timezone.utc) -> list[Log]:
                     grade=(row.get("logged_grade") or row.get("displayed_grade") or "").strip(),
                     angle=(row.get("angle") or "").strip(),
                     board=(row.get("board") or "board").strip(),
-                    ascent=(row.get("is_ascent") or "").lower() in {"1", "true", "yes"},
+                    ascent=_flag(row.get("is_ascent")),
+                    tries=tries,
+                    tries_total=max(tries, _count(row.get("tries_total"), tries)),
+                    sessions=max(1, _count(row.get("sessions_count"))),
+                    repeat=_flag(row.get("is_repeat")),
+                    mirror=_flag(row.get("is_mirror")),
                     has_time=(taken_at.hour, taken_at.minute, taken_at.second) != (0, 0, 0),
                 )
             )
@@ -111,6 +160,9 @@ def takeout_metadata(video: Path) -> tuple[datetime, str, Optional[Path]]:
             taken_at = datetime.fromtimestamp(video.stat().st_mtime, tz=timezone.utc)
         return taken_at, str(data.get("description") or "").strip(), sidecar
     return datetime.fromtimestamp(video.stat().st_mtime, tz=timezone.utc), "", None
+
+
+# --- Matching ---------------------------------------------------------------
 
 
 def normalize_name(text: str) -> str:
@@ -153,61 +205,182 @@ def find_log(taken_at: datetime, description: str, logs: list[Log], tolerance: t
     return None, None
 
 
-def caption_for(taken_at: datetime, description: str, log: Optional[Log]) -> str:
-    lines = [description] if description else ["[ADD DESCRIPTION]"]
-    if log:
-        detail = " · ".join(part for part in (log.climb_name, log.grade, f"{log.angle}°" if log.angle else "") if part)
-        lines.extend((detail, f"{log.board.title()} board · {taken_at.strftime('%B %Y')}"))
-        if not log.ascent:
-            lines.append("Project session")
-    else:
-        lines.append(taken_at.strftime("%B %Y"))
-    return "\n\n".join(lines)[:2200]
+# --- Captions ---------------------------------------------------------------
+
+
+def v_grade(grade: str) -> str:
+    """'7a+/V7' -> 'V7'; anything without a V part is returned as typed."""
+    for part in re.split(r"[/\s]+", grade):
+        if re.fullmatch(r"[Vv]\d+[+-]?", part):
+            return part.upper()
+    return grade
+
+
+def send_line(log: Log) -> str:
+    """The user-facing story of the send, from the logbook numbers."""
+    tries = max(log.tries, 1)
+    total = max(log.tries_total, tries)
+    if not log.ascent:
+        line = f"Project · {total} {'try' if total == 1 else 'tries'} so far"
+        if log.sessions > 1:
+            line += f" over {log.sessions} sessions"
+        return line
+    if log.repeat:
+        return "Repeat send" + (f" in {tries} tries" if tries > 1 else "")
+    if tries == 1 and total == 1 and log.sessions <= 1:
+        return "⚡ Flash"
+    if log.sessions > 1:
+        return f"Sent after {log.sessions} sessions ({total} tries)"
+    return f"Sent in {total} tries"
+
+
+def residual_note(description: str, log: Log) -> str:
+    """What the reviewer wrote beyond the climb name, grade and angle.
+
+    Works token by token so "Twist n' Shout V8 @ 30 (hard side)" against the
+    logbook's "Twist ‘n Shout" leaves just "(hard side)".
+    """
+    name_words = set(normalize_name(log.climb_name).split())
+    grade_words = set(normalize_name(log.grade).split()) | {normalize_name(v_grade(log.grade))}
+    angle_words = {normalize_name(log.angle), "deg", "degrees"}
+    kept = []
+    for token in description.split():
+        words = normalize_name(token).split()
+        if not words:
+            continue  # punctuation-only tokens such as "@", "-", "·"
+        if all(word in name_words for word in words):
+            continue
+        if all(word in grade_words or word in angle_words for word in words):
+            continue
+        kept.append(token)
+    return " ".join(kept).strip(" -·,")
+
+
+def caption_for(taken_at: datetime, description: str, log: Optional[Log], *, tags: str = DEFAULT_TAGS, board_label: str = DEFAULT_BOARD_LABEL) -> str:
+    """Caption in the form Tension's beta-video linking recognises."""
+    if log is None:
+        lines = [description or PLACEHOLDER, taken_at.strftime("%B %d, %Y").replace(" 0", " ")]
+        if tags:
+            lines.extend(("", tags))
+        return "\n".join(lines)[:2200]
+
+    when = log.taken_at.strftime("%B %d, %Y").replace(" 0", " ")
+    angle = f" @ {log.angle}°" if log.angle else ""
+    grade = f" {v_grade(log.grade)}" if log.grade else ""
+    mirror = " (mirror)" if log.mirror else ""
+    header = f'"{log.climb_name}"{grade}{angle}{mirror} on the {board_label}.'
+    lines = [header, f"{send_line(log)} · {when}"]
+    note = residual_note(description, log)
+    if note:
+        lines.append(note)
+    if tags:
+        lines.extend(("", tags))
+    return "\n".join(lines)[:2200]
 
 
 def climb_label(log: Log) -> str:
-    return " · ".join(part for part in (log.climb_name, log.grade, f"{log.angle}°" if log.angle else "") if part)
+    return " · ".join(part for part in (log.climb_name, v_grade(log.grade), f"{log.angle}°" if log.angle else "") if part)
 
 
-def build_manifest(takeout: Path, logs: list[Log], tolerance: timedelta) -> list[dict]:
+# --- Manifest ---------------------------------------------------------------
+
+
+def read_existing(path: Path) -> dict[str, dict]:
+    """Previously written records keyed by video path (empty if none)."""
+    if not path.is_file():
+        return {}
+    records = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            record = json.loads(line)
+            records[str(record.get("video_path") or "")] = record
+    return records
+
+
+def build_manifest(
+    takeout: Path,
+    logs: list[Log],
+    tolerance: timedelta,
+    *,
+    existing: Optional[dict[str, dict]] = None,
+    tags: str = DEFAULT_TAGS,
+    board_label: str = DEFAULT_BOARD_LABEL,
+) -> list[dict]:
+    existing = existing or {}
     records = []
     videos = sorted(path for path in takeout.rglob("*") if path.is_file() and path.suffix.lower() in VIDEO_SUFFIXES)
     for video in videos:
+        video_path = str(video.resolve())
+        previous = existing.get(video_path)
+        if previous and previous.get("status") in {"published", "skip"}:
+            records.append(previous)
+            continue
+
         taken_at, description, sidecar = takeout_metadata(video)
         log, method = find_log(taken_at, description, logs, tolerance)
         notes = [] if sidecar else ["No Takeout sidecar; timestamp came from file mtime."]
         candidates = []
         if log is None:
+            status = "unmatched"
             candidates = sorted({climb_label(entry) for entry in same_day_logs(taken_at, logs)})
             if candidates:
                 notes.append(
                     f"{len(candidates)} climb(s) logged that day but none within {int(tolerance.total_seconds() // 60)} min "
                     "or named in the description; name the climb in the description to match."
                 )
-        elif method == "description" and log.has_time and abs(log.taken_at - taken_at) > tolerance:
-            notes.append("Matched by climb name in the description; the log time is outside the tolerance window.")
-        elif method == "description" and not log.has_time:
-            notes.append("Matched by climb name in the description; that log entry has no time of day.")
-        elif method == "time" and description and normalize_name(log.climb_name) not in normalize_name(description):
-            # The reviewer wrote something, and it is not the climb we picked by
-            # time. Either the description names a climb missing from the logbook
-            # or the time match is wrong; a human has to decide.
-            notes.append(f"Matched by time only; the description does not mention {log.climb_name!r}. Verify.")
-        records.append(
-            {
-                "status": "needs_review",
-                "video_path": str(video.resolve()),
-                "sidecar_path": str(sidecar.resolve()) if sidecar else None,
-                "taken_at": taken_at.isoformat(),
-                "matched_log_at": log.taken_at.isoformat() if log else None,
-                "match_method": method,
-                "climb_name": log.climb_name if log else None,
-                "same_day_climbs": candidates,
-                "caption": caption_for(taken_at, description, log),
-                "notes": notes,
-            }
-        )
+            else:
+                notes.append("Nothing logged that day; name the climb in the description or skip this clip.")
+        elif method == "description":
+            status = "ready"
+            if log.has_time and abs(log.taken_at - taken_at) > tolerance:
+                notes.append("Matched by climb name in the description; the log time is outside the tolerance window.")
+            elif not log.has_time:
+                notes.append("Matched by climb name in the description; that log entry has no time of day.")
+        else:
+            status = "check_climb"
+            if description and normalize_name(log.climb_name) not in normalize_name(description):
+                notes.append(f"Matched by time only and the description does not mention {log.climb_name!r}; confirm the climb.")
+            else:
+                notes.append(f"Matched by time only ({log.climb_name!r}); confirm the climb, then approve.")
+
+        caption = caption_for(taken_at, description, log, tags=tags, board_label=board_label)
+        record = {
+            "status": status,
+            "video_path": video_path,
+            "sidecar_path": str(sidecar.resolve()) if sidecar else None,
+            "taken_at": taken_at.isoformat(),
+            "matched_log_at": log.taken_at.isoformat() if log else None,
+            "match_method": method,
+            "climb_name": log.climb_name if log else None,
+            "send": send_line(log) if log else None,
+            "same_day_climbs": candidates,
+            "caption": caption,
+            # Kept so a re-run can tell an untouched caption (safe to refresh)
+            # from one the reviewer edited (kept verbatim).
+            "caption_generated": caption,
+            "notes": notes,
+        }
+        if previous and previous.get("status") == "approved":
+            record = carry_over_approval(previous, record)
+        records.append(record)
     return records
+
+
+def carry_over_approval(previous: dict, fresh: dict) -> dict:
+    """Keep an approval across re-runs without losing the reviewer's edits.
+
+    The approval stands. The climb match and caption are refreshed only when
+    the reviewer left them as generated; if they changed the climb or wrote
+    their own caption, the whole previous record is kept.
+    """
+    reviewer_changed_climb = previous.get("climb_name") != fresh.get("climb_name")
+    generated = previous.get("caption_generated")
+    reviewer_edited_caption = generated is not None and previous.get("caption") != generated
+    if reviewer_changed_climb or reviewer_edited_caption:
+        return previous
+    refreshed = dict(fresh)
+    refreshed["status"] = "approved"
+    return refreshed
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -221,6 +394,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         default="UTC",
         help="Timezone of naive logbook timestamps: an IANA name (America/New_York), 'local', or UTC (default).",
     )
+    parser.add_argument("--tags", default=DEFAULT_TAGS, help="Mentions/hashtags appended to every caption ('' for none).")
+    parser.add_argument("--board-label", default=DEFAULT_BOARD_LABEL, help="Board name used in the caption header.")
     args = parser.parse_args(argv)
     if args.tolerance_minutes < 0:
         parser.error("--tolerance-minutes must be non-negative")
@@ -229,14 +404,29 @@ def main(argv: Optional[list[str]] = None) -> int:
     except ValueError as error:
         parser.error(str(error))
 
-    records = build_manifest(args.takeout, read_logs(args.logbook, logbook_tz), timedelta(minutes=args.tolerance_minutes))
+    existing = read_existing(args.output)
+    records = build_manifest(
+        args.takeout,
+        read_logs(args.logbook, logbook_tz),
+        timedelta(minutes=args.tolerance_minutes),
+        existing=existing,
+        tags=args.tags,
+        board_label=args.board_label,
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", encoding="utf-8") as handle:
         for record in records:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-    matched = sum(1 for record in records if record["climb_name"])
-    by_name = sum(1 for record in records if record["match_method"] == "description")
-    print(f"Wrote {len(records)} review records to {args.output} ({matched} matched, {by_name} of them by climb name)")
+
+    counts: dict[str, int] = {}
+    for record in records:
+        counts[record["status"]] = counts.get(record["status"], 0) + 1
+    summary = ", ".join(f"{count} {status}" for status, count in sorted(counts.items()))
+    print(f"Wrote {len(records)} records to {args.output}: {summary}")
+    if counts.get("check_climb"):
+        print("  check_climb: matched by time only - confirm the climb (edit climb_name/caption if wrong), then set status to approved.")
+    if counts.get("unmatched"):
+        print("  unmatched: no log entry - name the climb in the clip's description and re-run, or set status to skip.")
     return 0
 
 

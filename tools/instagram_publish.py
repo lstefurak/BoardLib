@@ -297,12 +297,14 @@ def main(
         print(error)
         return 2
 
-    published = [r for r in records if r.get("published_media_id")]
     approved = [r for r in records if r.get("status") == "approved" and not r.get("published_media_id")]
-    other = len(records) - len(published) - len(approved)
-    print(f"{args.manifest}: {len(records)} clips - {len(approved)} approved and unpublished, {len(published)} already published, {other} not approved")
+    counts: dict[str, int] = {}
+    for record in records:
+        counts[str(record.get("status") or "?")] = counts.get(str(record.get("status") or "?"), 0) + 1
+    summary = ", ".join(f"{count} {status}" for status, count in sorted(counts.items()))
+    print(f"{args.manifest}: {len(records)} clips ({summary}); {len(approved)} approved and not yet published")
     if not approved:
-        print("Nothing to publish. Set \"status\": \"approved\" on the clips you want posted.")
+        print("Nothing to publish. Set \"status\": \"approved\" on ready / check_climb clips you want posted.")
         return 0
 
     ready: list[dict[str, Any]] = []

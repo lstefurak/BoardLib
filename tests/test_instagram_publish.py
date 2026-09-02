@@ -103,7 +103,8 @@ def test_dry_run_reports_ready_clips_and_touches_nothing(manifest, capsys):
     assert run(manifest, meta=meta, stager=stager) == 0
 
     out = capsys.readouterr().out
-    assert "1 approved and unpublished, 1 already published, 1 not approved" in out
+    assert "1 approved, 1 needs_review, 1 published" in out
+    assert "1 approved and not yet published" in out
     assert "[ready] send.mp4" in out
     assert "Dry run: nothing was uploaded or posted" in out
     assert manifest.read_text(encoding="utf-8") == before

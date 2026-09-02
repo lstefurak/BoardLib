@@ -193,7 +193,25 @@ python tools/instagram_board_publisher.py /path/to/Takeout/Google\ Photos \
 Pass the timezone your logbook was recorded in: BoardLib exports naive local
 times, Takeout timestamps are UTC.
 
-Review the manifest, set `"status": "approved"` on the clips to post, then
+Captions are generated in the form Tension's beta-video linking recognises,
+with the send story taken from the logbook (a lightning bolt for a flash, tries
+for a one-session send, sessions when it took longer, "Project" for attempts),
+the day of the month, anything extra you wrote in the Google Photos description,
+and the `@tensionclimbing #tensionboard #climbing #bouldering` tags:
+
+```text
+"Bring an Axe" V7 @ 30° on the Tension Board.
+Sent in 3 tries · April 29, 2026
+(harder side)
+
+@tensionclimbing #tensionboard #climbing #bouldering
+```
+
+Each clip gets a status: `ready` (climb confirmed by your description),
+`check_climb` (matched by time only, confirm the climb), or `unmatched` (name
+the climb in the description and re-run). Set `"status": "approved"` on the
+clips to post, or `skip`. Re-running the planner keeps approved, skipped and
+published records; an approved caption you have not edited is refreshed. Then
 publish them as Reels (dry run by default; `--execute` posts for real):
 
 ```sh
