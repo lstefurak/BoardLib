@@ -225,7 +225,7 @@ Publishing needs `INSTAGRAM_ACCESS_TOKEN`, `INSTAGRAM_USER_ID` and
 private bucket behind a short-lived link, published, recorded back into the
 manifest with its media id so it can never be posted twice, and removed.
 
-See [the research, privacy notes, and proposed publishing phases](specs/instagram-publisher/research.md).
+See [the runbook](specs/instagram-publisher/runbook.md) for the end-to-end workflow, secrets, and troubleshooting, and [the research notes](specs/instagram-publisher/research.md) for the design history.
 
 ## Bugs 🐞 and Feature Requests 🗒️
 

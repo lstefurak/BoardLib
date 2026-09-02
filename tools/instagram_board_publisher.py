@@ -363,6 +363,18 @@ def build_manifest(
         if previous and previous.get("status") == "approved":
             record = carry_over_approval(previous, record)
         records.append(record)
+
+    # Reviewer/uploader records for files that are no longer in the folder are
+    # the only history of what was posted or decided; keep them, flagged.
+    seen = {record["video_path"] for record in records}
+    for video_path, previous in existing.items():
+        if video_path not in seen and previous.get("status") in PRESERVED_STATUSES:
+            kept = dict(previous)
+            notes = list(kept.get("notes") or [])
+            if "Video file no longer present in the Takeout folder." not in notes:
+                notes.append("Video file no longer present in the Takeout folder.")
+            kept["notes"] = notes
+            records.append(kept)
     return records
 
 

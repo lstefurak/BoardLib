@@ -200,6 +200,18 @@ def test_rerun_keeps_a_reviewer_edited_caption_or_climb(tmp_path):
     assert publisher.build_manifest(tmp_path, logs, timedelta(minutes=30), existing={path: changed_climb})[0] == changed_climb
 
 
+def test_rerun_keeps_published_records_whose_file_was_removed(tmp_path):
+    csv_path = write_logs(tmp_path, [])
+    gone = {"status": "published", "video_path": str(tmp_path / "deleted.mp4"), "published_media_id": "1", "notes": []}
+    forgotten = {"status": "ready", "video_path": str(tmp_path / "also-deleted.mp4")}
+
+    records = publisher.build_manifest(tmp_path, publisher.read_logs(csv_path), timedelta(minutes=30), existing={gone["video_path"]: gone, forgotten["video_path"]: forgotten})
+
+    assert [r["published_media_id"] for r in records if r.get("published_media_id")] == ["1"]
+    assert records[-1]["notes"] == ["Video file no longer present in the Takeout folder."]
+    assert all(r["video_path"] != forgotten["video_path"] for r in records)
+
+
 def test_cli_rerun_reads_the_existing_manifest_and_summarises_statuses(tmp_path, capsys):
     video = write_video(tmp_path / "takeout", "clip.mp4", timestamp=1777467240, description="Bring an Axe") if (tmp_path / "takeout").mkdir() is None else None
     csv_path = write_logs(tmp_path, [{"date": "2026-04-29T12:50:00+00:00", "climb_name": "Bring an Axe"}])
