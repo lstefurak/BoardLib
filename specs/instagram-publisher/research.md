@@ -48,16 +48,31 @@ python tools/instagram_board_publisher.py \
   --tolerance-minutes 180
 ```
 
-Each record starts with `status: needs_review`. Matching prefers a climb named
-in the clip's Google Photos description (same day, or the day either side),
-then the nearest timed log entry inside the configured window; anything else is
-left unmatched with the day's climbs listed under `same_day_climbs` so the
-reviewer can name the right one in the description and re-run. A missing
-sidecar is called out because file modification time is weaker evidence than
-Google capture time. BoardLib exports logbook timestamps as timezone-naive
-local times while Takeout timestamps are UTC, so always pass `--logbook-tz`
-(an IANA name, or `local`); without it every match is off by your UTC offset.
-Entries exported with no time of day (midnight) are never matched by time.
+Matching prefers a climb named in the clip's Google Photos description (same
+day, or the day either side) and marks the record `ready`; the nearest timed log
+entry inside the configured window gives `check_climb` (the reviewer confirms
+the climb); anything else is `unmatched` with the day's climbs listed under
+`same_day_climbs` so the reviewer can name the right one in the description and
+re-run. The reviewer sets `approved` or `skip`; the uploader sets `published`.
+Re-runs keep approved / skipped / published records, refreshing an approved
+caption only when it was left as generated (`caption_generated` records that).
+
+Captions follow the convention Tension's beta-video linking recognises,
+verified against posts that the Tension app itself links (`beta_links` in the
+board database): `"Climb" V7 @ 30° on the Tension Board.` followed by
+`@tensionclimbing #tensionboard #climbing #bouldering`. The second line is the
+send story from the logbook: `⚡ Flash`, `Sent in N tries`, `Sent after S
+sessions (N tries)`, `Repeat send`, or `Project · N tries so far`, then the day
+of the month. `(mirror)` is added for mirrored sends. Whatever the reviewer
+wrote in the description beyond the climb name, grade and angle is kept as a
+note line. `--tags` and `--board-label` override the fixed parts.
+
+A missing sidecar is called out because file modification time is weaker
+evidence than Google capture time. BoardLib exports logbook timestamps as
+timezone-naive local times while Takeout timestamps are UTC, so always pass
+`--logbook-tz` (an IANA name, or `local`); without it every match is off by
+your UTC offset. Entries exported with no time of day (midnight) are never
+matched by time.
 
 ## Proposed publishing phases
 
