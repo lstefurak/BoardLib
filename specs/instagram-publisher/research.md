@@ -1,5 +1,8 @@
 # Instagram board-video publisher: research and MVP
 
+> Operational notes (how to run it, secrets, troubleshooting, current state)
+> live in [runbook.md](runbook.md). This file is the design history.
+
 Research checked **August 31, 2026**. The recommended first version is a local,
 human-reviewed pipeline, not a bot with unrestricted access to the photo library.
 
