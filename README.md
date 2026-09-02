@@ -193,6 +193,20 @@ python tools/instagram_board_publisher.py /path/to/Takeout/Google\ Photos \
 Pass the timezone your logbook was recorded in: BoardLib exports naive local
 times, Takeout timestamps are UTC.
 
+Review the manifest, set `"status": "approved"` on the clips to post, then
+publish them as Reels (dry run by default; `--execute` posts for real):
+
+```sh
+python tools/instagram_publish.py --manifest data/instagram-manifest.jsonl
+python tools/instagram_publish.py --manifest data/instagram-manifest.jsonl --execute
+```
+
+Publishing needs `INSTAGRAM_ACCESS_TOKEN`, `INSTAGRAM_USER_ID` and
+`INSTAGRAM_STAGING_BUCKET` in the environment or `.env` (the bucket comes from
+`terraform output instagram_staging_bucket`). Each clip is staged in that
+private bucket behind a short-lived link, published, recorded back into the
+manifest with its media id so it can never be posted twice, and removed.
+
 See [the research, privacy notes, and proposed publishing phases](specs/instagram-publisher/research.md).
 
 ## Bugs 🐞 and Feature Requests 🗒️

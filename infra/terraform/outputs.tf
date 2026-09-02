@@ -3,6 +3,11 @@ output "function_url" {
   value       = aws_lambda_function_url.boardlog.function_url
 }
 
+output "instagram_staging_bucket" {
+  description = "Private S3 bucket for tools/instagram_publish.py (set INSTAGRAM_STAGING_BUCKET to this)."
+  value       = aws_s3_bucket.instagram_staging.bucket
+}
+
 output "function_name" {
   description = "Lambda function name."
   value       = aws_lambda_function.boardlog.function_name

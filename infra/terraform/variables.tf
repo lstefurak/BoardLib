@@ -51,6 +51,12 @@ variable "session_ttl_seconds" {
   default     = 43200
 }
 
+variable "instagram_staging_bucket" {
+  description = "Name of the private S3 bucket the Instagram uploader stages clips in. Empty = boardlog-instagram-staging-<account id>."
+  type        = string
+  default     = ""
+}
+
 variable "allowed_boards" {
   description = "Comma-separated list of board names the backend will allow."
   type        = string
