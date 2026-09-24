@@ -48,6 +48,39 @@ const KNOCK_PLACEHOLDER = "say the quiet part";
 
 class SessionExpiredError extends Error {}
 
+// A normal token lives in sessionStorage and dies with the tab. "Keep me
+// signed in" instead parks the (longer-lived) token in localStorage so a
+// trusted device — a phone — stays unlocked across tabs and restarts until
+// the token's own expiry. Only ever one token is stored; these helpers keep
+// the two stores from drifting out of sync.
+function storeSession(token, remember) {
+  clearStoredSession();
+  if (!token) return;
+  try {
+    (remember ? localStorage : sessionStorage).setItem(SESSION_STORAGE_KEY, token);
+  } catch (error) {
+    // Private-mode or storage-disabled browsers throw on setItem; the token
+    // still lives in state for this tab, so don't trap the user at the gate.
+  }
+}
+
+function readStoredSession() {
+  try {
+    return localStorage.getItem(SESSION_STORAGE_KEY) || sessionStorage.getItem(SESSION_STORAGE_KEY) || "";
+  } catch (error) {
+    return "";
+  }
+}
+
+function clearStoredSession() {
+  try {
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+    sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch (error) {
+    // Nothing to clear if storage is unavailable.
+  }
+}
+
 async function callBackend(endpoint, bodyObj, extraHeaders = {}) {
   return fetch(endpoint, {
     method: "POST",
@@ -58,12 +91,12 @@ async function callBackend(endpoint, bodyObj, extraHeaders = {}) {
 
 // Ask the backend to verify the knock. Resolves to a session token, or "" when
 // there is no backend to talk to (CSV-only use, or backend-free local dev).
-async function verifyGate(phrase) {
+async function verifyGate(phrase, remember = false) {
   const endpoint = currentEndpoint();
   // CSV-only use has no backend and nothing to protect, so open the door locally.
   if (!endpoint) return "";
   try {
-    const response = await callBackend(endpoint, { action: "unlock" }, { "X-Board-Gate": phrase });
+    const response = await callBackend(endpoint, { action: "unlock", remember }, { "X-Board-Gate": phrase });
     if (response.status === 403) throw new Error("The door stays shut.");
     if (!response.ok) throw new Error(`Gate check failed (HTTP ${response.status}).`);
     const payload = await response.json().catch(() => ({}));
@@ -95,11 +128,10 @@ function enterRoom() {
   $("app").classList.remove("is-hidden");
 }
 
-async function unlock(phrase) {
-  const token = await verifyGate(phrase);
+async function unlock(phrase, remember = false) {
+  const token = await verifyGate(phrase, remember);
   state.session = token;
-  if (token) sessionStorage.setItem(SESSION_STORAGE_KEY, token);
-  else sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  storeSession(token, remember);
   // The phrase has done its job; don't leave it one "Show" click away.
   $("knockInput").value = "";
   $("knockInput").placeholder = KNOCK_PLACEHOLDER;
@@ -108,7 +140,7 @@ async function unlock(phrase) {
 
 function lock() {
   state.session = "";
-  sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  clearStoredSession();
   $("app").classList.add("is-hidden");
   $("gate").classList.remove("is-hidden");
   // Reset the app layout so the next unlock starts at the fetch form.
@@ -849,7 +881,7 @@ function setView(view) {
 $("knockForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
-    await unlock($("knockInput").value.trim());
+    await unlock($("knockInput").value.trim(), $("rememberMe").checked);
   } catch (error) {
     $("knockInput").value = "";
     $("knockInput").placeholder = error.message;
@@ -1067,12 +1099,12 @@ $("copyLog").addEventListener("click", async () => {
 // A refresh resumes the tab's session: the backend already verified the knock
 // for this token, and sessionStorage dies with the tab. Otherwise show the
 // gate, prefilling the .env knock in local dev so a tester only presses Enter.
-const storedSession = sessionStorage.getItem(SESSION_STORAGE_KEY) || "";
+const storedSession = readStoredSession();
 if (sessionIsLive(storedSession)) {
   state.session = storedSession;
   enterRoom();
 } else {
-  sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  clearStoredSession();
   if (IS_LOCAL && local.knock) $("knockInput").value = local.knock;
 }
 

@@ -41,6 +41,11 @@ DEFAULT_MAX_SYNC_PAGES = 100
 # signed with a key derived from BOTH secrets: rotating either one immediately
 # invalidates every outstanding session, and the page never sees the access key.
 DEFAULT_SESSION_TTL_SECONDS = 12 * 60 * 60
+# "Remember me": a correct knock can ask for a long-lived token so a trusted
+# device (a phone) doesn't re-knock every tab. It is the SAME kind of token,
+# signed the same way — only the lifetime is longer — so rotating either
+# secret still revokes it, and the client still can't extend its own expiry.
+DEFAULT_REMEMBER_TTL_SECONDS = 30 * 24 * 60 * 60
 SESSION_MESSAGE_PREFIX = b"boardlog-session:"
 # The expiry half of a token is a unix timestamp: ASCII digits only, and short
 # enough that int() can never choke on it. (str.isdigit() also accepts Unicode
@@ -76,7 +81,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if action == "unlock":
             if check_secret(event, GATE_HEADER, GATE_SECRET):
                 payload: dict[str, Any] = {"ok": True}
-                session = issue_session()
+                session = issue_session(remember=bool(body.get("remember")))
                 if session:
                     payload["session"], payload["expires_at"] = session
                 return log_and_respond(200, payload, action="unlock")
@@ -230,9 +235,15 @@ def sign_session(expires_at: int) -> str | None:
     return hmac.new(key, SESSION_MESSAGE_PREFIX + str(expires_at).encode("ascii"), hashlib.sha256).hexdigest()
 
 
-def issue_session() -> tuple[str, int] | None:
-    """Mint a session token: ``"<unix expiry>.<hex hmac>"`` plus its expiry."""
-    expires_at = int(time.time()) + session_ttl_seconds()
+def issue_session(remember: bool = False) -> tuple[str, int] | None:
+    """Mint a session token: ``"<unix expiry>.<hex hmac>"`` plus its expiry.
+
+    ``remember=True`` (the gate's "keep me signed in" box) uses the longer
+    remember-me lifetime so a trusted device stays unlocked; the default is
+    the short session lifetime.
+    """
+    ttl = remember_ttl_seconds() if remember else session_ttl_seconds()
+    expires_at = int(time.time()) + ttl
     signature = sign_session(expires_at)
     if signature is None:
         return None
@@ -264,6 +275,26 @@ def session_ttl_seconds() -> int:
     if ttl <= 0:
         print(f"WARNING: BOARDLOG_SESSION_TTL_SECONDS={configured!r} must be positive; using {DEFAULT_SESSION_TTL_SECONDS}")
         return DEFAULT_SESSION_TTL_SECONDS
+    return ttl
+
+
+def remember_ttl_seconds() -> int:
+    """Lifetime of a "remember me" token, default 30 days.
+
+    Overridable with BOARDLOG_REMEMBER_TTL_SECONDS; a missing, non-integer, or
+    non-positive value falls back to the default so a bad env var can never
+    mint a zero-length (instantly stale) or negative token.
+    """
+    configured = os.environ.get("BOARDLOG_REMEMBER_TTL_SECONDS", "")
+    try:
+        ttl = int(configured)
+    except ValueError:
+        if configured:
+            print(f"WARNING: BOARDLOG_REMEMBER_TTL_SECONDS={configured!r} is not an integer; using {DEFAULT_REMEMBER_TTL_SECONDS}")
+        return DEFAULT_REMEMBER_TTL_SECONDS
+    if ttl <= 0:
+        print(f"WARNING: BOARDLOG_REMEMBER_TTL_SECONDS={configured!r} must be positive; using {DEFAULT_REMEMBER_TTL_SECONDS}")
+        return DEFAULT_REMEMBER_TTL_SECONDS
     return ttl
 
 

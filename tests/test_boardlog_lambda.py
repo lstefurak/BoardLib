@@ -16,6 +16,7 @@ class TestBoardLogLambda(unittest.TestCase):
             "BOARDLOG_GATE_PHRASE_PARAM",
             "BOARDLOG_ALLOWED_BOARDS",
             "BOARDLOG_SESSION_TTL_SECONDS",
+            "BOARDLOG_REMEMBER_TTL_SECONDS",
             "AWS_LAMBDA_FUNCTION_NAME",
         ):
             os.environ.pop(name, None)
@@ -177,9 +178,12 @@ class TestBoardLogLambda(unittest.TestCase):
         os.environ["BOARDLOG_GATE_PHRASE"] = "open sesame"
         os.environ["BOARDLOG_ACCESS_KEY"] = "secret"
 
-    def unlock(self, phrase="open sesame"):
+    def unlock(self, phrase="open sesame", remember=None):
+        body = {"action": "unlock"}
+        if remember is not None:
+            body["remember"] = remember
         response = handler.lambda_handler(
-            self.event({"action": "unlock"}, headers={"X-Board-Gate": phrase}), None
+            self.event(body, headers={"X-Board-Gate": phrase}), None
         )
         return response, json.loads(response["body"])
 
@@ -210,6 +214,37 @@ class TestBoardLogLambda(unittest.TestCase):
         response, payload = self.unlock("nope")
         self.assertEqual(response["statusCode"], 403)
         self.assertNotIn("session", payload)
+
+    def test_remember_me_issues_a_30_day_token(self):
+        self.configure_secrets()
+        response, payload = self.unlock(remember=True)
+        self.assertEqual(response["statusCode"], 200)
+        # Same verifiable token, just a much longer life (default 30 days).
+        self.assertTrue(handler.verify_session(payload["session"]))
+        self.assertAlmostEqual(
+            payload["expires_at"], time.time() + handler.DEFAULT_REMEMBER_TTL_SECONDS, delta=5
+        )
+        self.assertEqual(handler.DEFAULT_REMEMBER_TTL_SECONDS, 30 * 24 * 60 * 60)
+        # A remember token clearly outlives a normal one.
+        _, normal = self.unlock(remember=False)
+        self.assertGreater(payload["expires_at"], normal["expires_at"])
+
+    def test_wrong_knock_gets_no_remember_token(self):
+        self.configure_secrets()
+        response, payload = self.unlock("nope", remember=True)
+        self.assertEqual(response["statusCode"], 403)
+        self.assertNotIn("session", payload)
+
+    def test_remember_ttl_is_configurable(self):
+        self.configure_secrets()
+        os.environ["BOARDLOG_REMEMBER_TTL_SECONDS"] = "3600"
+        _, payload = self.unlock(remember=True)
+        self.assertAlmostEqual(payload["expires_at"], time.time() + 3600, delta=5)
+
+    def test_bad_remember_ttl_falls_back_to_default(self):
+        for bad in ("nonsense", "0", "-5"):
+            os.environ["BOARDLOG_REMEMBER_TTL_SECONDS"] = bad
+            self.assertEqual(handler.remember_ttl_seconds(), handler.DEFAULT_REMEMBER_TTL_SECONDS)
 
     @unittest.mock.patch("backend.boardlog_lambda.handler.export_logbook")
     def test_export_accepts_a_session_token_alone(self, mock_export):

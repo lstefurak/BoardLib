@@ -73,6 +73,7 @@ Body:
 - `BOARDLOG_GATE_PHRASE_PARAM`: SSM SecureString parameter name holding the gate phrase (production).
 - `BOARDLOG_ACCESS_KEY` / `BOARDLOG_GATE_PHRASE`: Plaintext fallbacks for local/dev/tests. Take precedence over the SSM parameters when set. Locally, a check is disabled if neither the env var nor the parameter is configured. **In Lambda the same situation fails closed** (every request is refused with 403 and a warning is logged) so a misconfigured deployment can never silently run without authentication.
 - `BOARDLOG_SESSION_TTL_SECONDS`: Optional lifetime of the session token issued by a correct gate phrase. Defaults to `43200` (12 hours).
+- `BOARDLOG_REMEMBER_TTL_SECONDS`: Optional lifetime of a "remember me" token — issued when the unlock request sets `{"remember": true}` (the gate's *Keep me signed in* box) so a trusted device stays unlocked without re-knocking. It is the same signed token type, so rotating either secret still revokes it. Defaults to `2592000` (30 days).
 - `BOARDLOG_CACHE_DIR`: Optional database cache directory. Defaults to `/tmp/boardlog`.
 - `BOARDLOG_MAX_SYNC_PAGES`: Optional shared database sync page cap. Defaults to `100`.
 - `BOARDLOG_ALLOWED_BOARDS`: Optional comma-separated board names. Defaults to `tension`.
