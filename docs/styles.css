@@ -125,6 +125,21 @@ h2 {
   gap: 8px;
 }
 
+.remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.remember input {
+  width: auto;
+  margin: 0;
+  cursor: pointer;
+}
+
 .hint,
 .status {
   margin: 0;

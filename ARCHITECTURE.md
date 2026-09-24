@@ -40,7 +40,11 @@ security model holds up.
    answers with a **session token** — `<expiry>.<HMAC>`, signed with a key
    derived from both secrets, valid for 12 hours by default. The UI reveals;
    only the token is kept, in `sessionStorage` for the tab. The phrase is never
-   stored, and the page never sees the access key.
+   stored, and the page never sees the access key. Ticking *Keep me signed in*
+   sends `{"remember":true}`, which mints the same signed token with a 30-day
+   life and parks it in `localStorage` so a trusted device (a phone) stays
+   unlocked across restarts; **Lock** clears it. Because it is the same token
+   type, rotating either secret still revokes it.
 2. **Export.** The user supplies Tension username/password. The page `POST`s
    them with `X-Board-Session: <token>`. The Lambda verifies the token
    (signature and expiry), then logs in to Tension and returns rows. Scripts can
