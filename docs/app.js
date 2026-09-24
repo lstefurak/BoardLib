@@ -65,19 +65,34 @@ function storeSession(token, remember) {
 }
 
 function readStoredSession() {
+  // Read each backend independently: if one throws (e.g. a policy blocks
+  // persistent storage), a valid token in the other must still be found —
+  // otherwise a non-remembered tab gets bounced back to the gate on refresh.
+  let remembered = "";
   try {
-    return localStorage.getItem(SESSION_STORAGE_KEY) || sessionStorage.getItem(SESSION_STORAGE_KEY) || "";
+    remembered = localStorage.getItem(SESSION_STORAGE_KEY) || "";
+  } catch (error) {
+    // localStorage unavailable; fall through to the tab session.
+  }
+  if (remembered) return remembered;
+  try {
+    return sessionStorage.getItem(SESSION_STORAGE_KEY) || "";
   } catch (error) {
     return "";
   }
 }
 
 function clearStoredSession() {
+  // Independent try/catch so a throw from one store still clears the other.
   try {
     localStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch (error) {
+    // Nothing to clear if localStorage is unavailable.
+  }
+  try {
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
   } catch (error) {
-    // Nothing to clear if storage is unavailable.
+    // Nothing to clear if sessionStorage is unavailable.
   }
 }
 
