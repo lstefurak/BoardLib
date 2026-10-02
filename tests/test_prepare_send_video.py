@@ -137,3 +137,4 @@ def test_cli_defaults_to_five_second_two_line_overlay(monkeypatch, tmp_path):
                        "--angle", "30", "--sent", "8/26"]) == 0
     assert calls[0][3] == 5.0
     assert calls[0][4] == ["Example", "V8  ·  30°  ·  8/26"]
+    assert calls[0][5] == "V8"

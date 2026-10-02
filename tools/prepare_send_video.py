@@ -24,6 +24,21 @@ import tempfile
 from PIL import Image, ImageDraw, ImageFont
 
 
+# Cool-to-warm grade accents: higher grades use warmer, more saturated hues.
+GRADE_COLORS = {
+    "V6": "#67c5b5",   # teal
+    "V7": "#70b7f0",   # blue
+    "V8": "#b29bfa",   # purple
+    "V9": "#f487c5",   # pink
+    "V10": "#ff6b6b",  # vivid red
+}
+
+
+def grade_color(grade: str) -> str:
+    """Keep +/- variants in their grade family; use neutral text outside V6-V10."""
+    return GRADE_COLORS.get(grade.strip().upper().rstrip("+-"), "#d1d5db")
+
+
 class VideoError(RuntimeError):
     """A user-actionable video preparation error."""
 
@@ -111,7 +126,7 @@ def _font(size: int):
     return ImageFont.load_default()
 
 
-def make_title(path: Path, info: VideoInfo, lines: list[str]) -> None:
+def make_title(path: Path, info: VideoInfo, lines: list[str], grade: str = "") -> None:
     """Render a compact, translucent two-line box for the bottom of the video."""
     width = max(2, int(info.width * 0.90))
     padding = max(8, int(min(info.width, info.height) * 0.025))
@@ -130,7 +145,7 @@ def make_title(path: Path, info: VideoInfo, lines: list[str]) -> None:
     draw.rounded_rectangle((0, 0, width - 1, height - 1), radius=padding, fill=(17, 24, 39, 225))
     y = padding
     for index, (line, font, box) in enumerate(zip(lines, fonts, boxes)):
-        color = "#ffffff" if index == 0 else "#fbbf77"
+        color = "#ffffff" if index == 0 else grade_color(grade)
         x = (width - (box[2] - box[0])) / 2 - box[0]
         draw.text((x, y - box[1]), line, fill=color, font=font)
         y += box[3] - box[1] + gap
@@ -168,7 +183,7 @@ def make_sheet(video: Path, output: Path, interval: float, columns: int) -> None
     print(f"Wrote {output} ({len(frames)} frames across {info.duration:.2f} seconds)")
 
 
-def edit_video(video: Path, output: Path, start: float, title_seconds: float, lines: list[str]) -> None:
+def edit_video(video: Path, output: Path, start: float, title_seconds: float, lines: list[str], grade: str = "") -> None:
     info = probe_video(video)
     if start < 0 or start >= info.duration:
         raise VideoError(f"--start must be between 0 and {info.duration:.2f} seconds")
@@ -177,7 +192,7 @@ def edit_video(video: Path, output: Path, start: float, title_seconds: float, li
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="boardlib-title-") as temporary:
         card = Path(temporary) / "title.png"
-        make_title(card, info, lines)
+        make_title(card, info, lines, grade)
         bottom_margin = max(4, int(info.height * 0.035))
         video_filter = (
             f"[0:v]fps={info.fps:.6f},scale={info.width}:{info.height}:force_original_aspect_ratio=decrease,"
@@ -241,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
             make_sheet(args.video, args.output, args.interval, args.columns)
         else:
             angle = args.angle if args.angle.endswith("°") else f"{args.angle}°"
-            edit_video(args.video, args.output, args.start, args.title_seconds, [args.name, f"{args.grade}  ·  {angle}  ·  {args.sent}"])
+            edit_video(args.video, args.output, args.start, args.title_seconds, [args.name, f"{args.grade}  ·  {angle}  ·  {args.sent}"], args.grade)
         return 0
     except (VideoError, subprocess.CalledProcessError, json.JSONDecodeError) as error:
         print(f"error: {error}", file=sys.stderr)

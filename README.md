@@ -250,6 +250,11 @@ python tools/prepare_send_video.py edit input.mov \
   --name "Example Climb" --grade V7 --angle 30 --sent "8/26"
 ```
 
+The details line uses a cool-to-warm grade spectrum: **V6 teal, V7 blue,
+V8 purple, V9 pink, V10 vivid red**. The climb name stays white on a dark navy
+box. The printed grade remains visible as well as its color. Lowercase grades
+and `+`/`-` variants use the same grade color; other grades use neutral gray.
+
 The source file is never modified. Output is H.264/AAC MP4, inherited metadata
 is removed, and clips without an audio stream are supported. Install the
 `ffmpeg` and `ffprobe` executables separately and use the existing Python/Pillow
