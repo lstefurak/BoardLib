@@ -3,8 +3,9 @@
 ## Goal and boundary
 
 The repeatable job is to (1) identify the first frame where the climber is
-seated, (2) remove everything before it, and (3) prepend a title containing a
-name, grade, wall angle, and send month/year. The repository must not contain a
+seated, (2) remove everything before it, and (3) overlay a two-line title box at the bottom for the first five seconds.
+The lines contain the climb name and the grade, wall angle, and compact date
+(for example `8/26`). The repository must not contain a
 specific person's identity or private media.
 
 The implemented workflow keeps step 1 human-reviewable. A command produces a
@@ -18,7 +19,7 @@ climber is occluded, crouching, or already close to the wall.
 ### FFmpeg driven by Python (selected)
 
 FFmpeg supplies the mature codecs, probing, stream mapping, trim, scale, pad,
-concatenation, resampling, and web-optimized MP4 output needed here. Python's
+overlay, resampling, and web-optimized MP4 output needed here. Python's
 `subprocess` module is enough orchestration; avoiding an FFmpeg wrapper removes
 an extra API/version boundary. The title image and contact sheet are composed
 with Pillow, already a BoardLib dependency.
@@ -27,7 +28,7 @@ The relevant upstream references are:
 
 - [FFmpeg command-line documentation](https://ffmpeg.org/ffmpeg.html)
 - [FFmpeg filter documentation](https://ffmpeg.org/ffmpeg-filters.html), in
-  particular `concat`, `fps`, `scale`, `pad`, `atrim`, `asetpts`, and `aresample`
+  particular `overlay`, `fps`, `scale`, `pad`, `asetpts`, and `aresample`
 - [ffprobe documentation](https://ffmpeg.org/ffprobe.html)
 - [Python subprocess documentation](https://docs.python.org/3/library/subprocess.html)
 - [Pillow ImageDraw documentation](https://pillow.readthedocs.io/en/stable/reference/ImageDraw.html)
@@ -74,24 +75,29 @@ Any such result should remain a suggestion displayed on the contact sheet.
 
 ## Implemented pipeline
 
-`tools/prepare_send_video.py` has two subcommands:
+`tools/prepare_send_video.py` has three subcommands:
 
 1. `sheet` asks FFmpeg to sample the complete clip at a configurable interval,
    then Pillow lays the frames out with timestamps.
 2. `edit` uses ffprobe to discover display dimensions, duration, frame rate,
-   rotation, and audio presence. Pillow renders a private temporary title card.
-   FFmpeg normalizes the card and clip, concatenates them, inserts silence under
-   the card when the source has audio, encodes H.264/AAC, moves MP4 metadata to
-   the front for streaming, and discards inherited metadata.
+   rotation, and audio presence. Pillow renders a temporary translucent title
+   box with two lines. FFmpeg overlays it at the bottom of the trimmed clip
+   while output time is less than five seconds (configurable with
+   `--title-seconds`). The video and its audio start immediately, with no added
+   intro or silent segment. Output is H.264/AAC with inherited metadata removed
+   and MP4 metadata at the front for streaming.
+3. `check` verifies FFmpeg, ffprobe, and Pillow before processing media.
 
-Audio/video are re-encoded rather than stream-copied because an exact visual
-cut, generated title segment, dimension normalization, and concatenation all
-require decoded frames. The source is never modified.
+Audio/video are re-encoded rather than stream-copied because the visual cut,
+overlay, and dimension normalization require decoded frames. The source is never
+modified. Clips shorter than the overlay duration end at their original trimmed
+length. Frames during the first five seconds include both the climb and title
+and can be used as cover images.
 
 ## LLM compatibility and cost
 
 There is no LLM integration in the pipeline and no network request, AI SDK, API
-key, or model-specific file format. Both subcommands run locally using FFmpeg,
+key, or model-specific file format. All subcommands run locally using FFmpeg,
 ffprobe, and Pillow. A human can inspect the contact sheet, so the workflow has
 no AI cost at all.
 
@@ -128,18 +134,17 @@ acceptable; local human review remains the privacy-preserving default.
 
 ## Release readiness
 
-The tool is ready for code review but should not be called production-verified
-until one representative phone video completes the `sheet` and `edit` workflow
-on a workstation with FFmpeg. Unit tests validate metadata interpretation,
-title rendering, validation, and filter-command construction without executing
-the external encoder. The repository now provides a `check` subcommand so the
-workstation dependency gate is explicit.
+Unit tests validate metadata interpretation, title rendering, validation,
+filter-command construction, and closure of contact-sheet images before
+Windows temporary-directory cleanup. A representative rotated phone video has
+also completed the `check`, `sheet`, and `edit` workflow on Windows. That smoke
+test does not establish correctness for every input; watch each full result to
+check title placement, timing, orientation, audio, and privacy.
 
-There is no cloud deployment or Gemini setup. The operator's remaining tasks
-are to install FFmpeg and the Python dependencies, run `check`, process a sample,
-watch the entire result, and only then use it on the intended clips. Audio is
-normalized to a stereo 48 kHz stream before concatenation so mono phone audio
-can be joined to the silent title segment.
+There is no cloud deployment or Gemini setup. Install FFmpeg and the Python
+dependencies, run `check`, process a sample, and watch the result before sharing.
+Audio is normalized to stereo at 48 kHz without inserting silence or shifting
+the clip to make room for a separate title card.
 
 ## Research environment note
 

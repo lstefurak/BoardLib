@@ -34,26 +34,39 @@ def test_probe_reads_rotation_audio_duration_and_rate(monkeypatch, tmp_path):
     assert info.has_audio
 
 
-def test_title_card_contains_requested_dimensions(tmp_path):
+def test_title_overlay_is_compact_with_transparent_corners(tmp_path):
     target = tmp_path / "card.png"
-    video.make_title(target, video.VideoInfo(640, 360, 10, 30, False), ["Example Climb", "V6 · 30°", "April 2026"])
+    video.make_title(target, video.VideoInfo(640, 360, 10, 30, False), ["Example Climb", "V6 · 30° · 8/26"])
     with video.Image.open(target) as image:
-        assert image.size == (640, 360)
-        assert image.getpixel((0, 0)) == (249, 115, 22)
+        assert image.width == 576
+        assert image.height < 120
+        assert image.mode == "RGBA"
+        assert image.getpixel((0, 0))[3] == 0
+        assert image.getpixel((image.width // 2, 1))[3] == 225
 
 
-def test_edit_builds_audio_concat_and_strips_metadata(monkeypatch, tmp_path):
+@pytest.mark.parametrize("has_audio", [True, False])
+def test_edit_overlays_title_without_delaying_clip(monkeypatch, tmp_path, has_audio):
     commands = []
-    monkeypatch.setattr(video, "probe_video", lambda path: video.VideoInfo(1080, 1920, 20, 30, True))
+    monkeypatch.setattr(video, "probe_video", lambda path: video.VideoInfo(1080, 1920, 20, 30, has_audio))
     monkeypatch.setattr(video, "_run", lambda command, capture=False: commands.append(command) or completed())
     source, output = tmp_path / "in.mov", tmp_path / "out.mp4"
     source.write_bytes(b"x")
-    video.edit_video(source, output, 3.25, 2.5, ["Example", "V7 · 40°", "May 2026"])
+    video.edit_video(source, output, 3.25, 5, ["Example", "V7 · 40° · 8/26"])
     command = commands[-1]
     assert command[command.index("-ss") + 1] == "3.25"
-    assert "anullsrc=r=48000:cl=stereo" in command
-    assert "[silence][audio]concat=n=2:v=0:a=1[outa]" in command[command.index("-filter_complex") + 1]
-    assert "channel_layouts=stereo" in command[command.index("-filter_complex") + 1]
+    filters = command[command.index("-filter_complex") + 1]
+    assert "enable='lt(t,5)'" in filters
+    assert "overlay=" in filters
+    assert "concat" not in filters
+    assert "-loop" not in command
+    assert command[command.index("-i") + 1] == str(source)
+    if has_audio:
+        assert "0:a:0" in command
+        assert "channel_layouts=stereo" in command[command.index("-af") + 1]
+    else:
+        assert "-an" in command
+        assert "-af" not in command
     assert command[command.index("-map_metadata") + 1] == "-1"
 
 
@@ -111,3 +124,16 @@ def test_sheet_closes_frame_handles_before_temporary_cleanup(monkeypatch, tmp_pa
     assert all(not directory.exists() for directory in temporary_paths)
     with real_open(output) as sheet:
         assert sheet.size == (640, 210)
+
+
+def test_cli_defaults_to_five_second_two_line_overlay(monkeypatch, tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"x")
+    calls = []
+    monkeypatch.setattr(video, "_require_tools", lambda *names: None)
+    monkeypatch.setattr(video, "edit_video", lambda *args: calls.append(args))
+    assert video.main(["edit", str(source), "--output", str(tmp_path / "out.mp4"),
+                       "--start", "0", "--name", "Example", "--grade", "V8",
+                       "--angle", "30", "--sent", "8/26"]) == 0
+    assert calls[0][3] == 5.0
+    assert calls[0][4] == ["Example", "V8  ·  30°  ·  8/26"]

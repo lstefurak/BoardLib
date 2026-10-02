@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Prepare a shareable climbing clip with a title card and a clean start.
+"""Prepare a shareable climbing clip with a bottom title overlay and a clean start.
 
 The tool deliberately keeps the subjective decision (the first frame where the
 climber is seated) reviewable.  ``sheet`` makes timestamped thumbnails; ``edit``
-then trims at the chosen timestamp and prepends a generated title card.
+then trims at the chosen timestamp and overlays a two-line title for five seconds.
 
 FFmpeg and ffprobe must be installed and available on PATH.  Pillow is the only
 Python dependency and is already a BoardLib dependency.
@@ -112,28 +112,28 @@ def _font(size: int):
 
 
 def make_title(path: Path, info: VideoInfo, lines: list[str]) -> None:
-    image = Image.new("RGB", (info.width, info.height), "#111827")
-    draw = ImageDraw.Draw(image)
-    accent_height = max(8, info.height // 90)
-    draw.rectangle((0, 0, info.width, accent_height), fill="#f97316")
-    draw.rectangle((0, info.height - accent_height, info.width, info.height), fill="#f97316")
-
-    max_width = info.width * 0.82
-    size = max(18, int(min(info.width, info.height) * 0.095))
-    while size > 16:
-        font = _font(size)
-        if all(draw.textbbox((0, 0), line, font=font)[2] <= max_width for line in lines):
+    """Render a compact, translucent two-line box for the bottom of the video."""
+    width = max(2, int(info.width * 0.90))
+    padding = max(8, int(min(info.width, info.height) * 0.025))
+    size = max(12, int(min(info.width, info.height) * 0.052))
+    measure = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    while True:
+        fonts = [_font(size), _font(max(10, int(size * 0.78)))]
+        boxes = [measure.textbbox((0, 0), line, font=font) for line, font in zip(lines, fonts)]
+        if size <= 10 or all(box[2] - box[0] <= width - 2 * padding for box in boxes):
             break
-        size -= 2
-    line_gap = int(size * 0.55)
-    heights = [draw.textbbox((0, 0), line, font=font)[3] for line in lines]
-    total = sum(heights) + line_gap * (len(lines) - 1)
-    y = (info.height - total) / 2
-    for index, (line, line_height) in enumerate(zip(lines, heights)):
-        color = "#ffffff" if index == 0 else "#d1d5db"
-        box = draw.textbbox((0, 0), line, font=font)
-        draw.text(((info.width - (box[2] - box[0])) / 2, y), line, fill=color, font=font)
-        y += line_height + line_gap
+        size -= 1
+    gap = max(6, int(size * 0.35))
+    height = sum(box[3] - box[1] for box in boxes) + gap + 2 * padding
+    image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((0, 0, width - 1, height - 1), radius=padding, fill=(17, 24, 39, 225))
+    y = padding
+    for index, (line, font, box) in enumerate(zip(lines, fonts, boxes)):
+        color = "#ffffff" if index == 0 else "#fbbf77"
+        x = (width - (box[2] - box[0])) / 2 - box[0]
+        draw.text((x, y - box[1]), line, fill=color, font=font)
+        y += box[3] - box[1] + gap
     image.save(path)
 
 
@@ -178,28 +178,24 @@ def edit_video(video: Path, output: Path, start: float, title_seconds: float, li
     with tempfile.TemporaryDirectory(prefix="boardlib-title-") as temporary:
         card = Path(temporary) / "title.png"
         make_title(card, info, lines)
+        bottom_margin = max(4, int(info.height * 0.035))
         video_filter = (
-            f"[0:v]fps={info.fps:.6f},format=yuv420p,setsar=1,setpts=PTS-STARTPTS[title];"
-            f"[1:v]fps={info.fps:.6f},scale={info.width}:{info.height}:force_original_aspect_ratio=decrease,"
+            f"[0:v]fps={info.fps:.6f},scale={info.width}:{info.height}:force_original_aspect_ratio=decrease,"
             f"pad={info.width}:{info.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,setpts=PTS-STARTPTS[clip];"
-            "[title][clip]concat=n=2:v=1:a=0[outv]"
+            f"[clip][1:v]overlay=x=(W-w)/2:y=H-h-{bottom_margin}:"
+            f"enable='lt(t,{title_seconds})':eof_action=repeat:format=auto,format=yuv420p[outv]"
         )
         command = [
             "ffmpeg", "-hide_banner", "-loglevel", "warning", "-y",
-            "-loop", "1", "-framerate", f"{info.fps:.6f}", "-t", str(title_seconds), "-i", str(card),
-            "-ss", str(start), "-i", str(video),
+            "-ss", str(start), "-i", str(video), "-i", str(card),
+            "-filter_complex", video_filter, "-map", "[outv]",
         ]
         if info.has_audio:
-            command += ["-f", "lavfi", "-t", str(title_seconds), "-i", "anullsrc=r=48000:cl=stereo"]
-            video_filter += (
-                f";[2:a]atrim=duration={title_seconds},asetpts=PTS-STARTPTS[silence];"
-                "[1:a]aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo,"
-                "asetpts=PTS-STARTPTS[audio];"
-                "[silence][audio]concat=n=2:v=0:a=1[outa]"
-            )
-        command += ["-filter_complex", video_filter, "-map", "[outv]"]
-        if info.has_audio:
-            command += ["-map", "[outa]", "-c:a", "aac", "-b:a", "192k"]
+            command += [
+                "-map", "0:a:0", "-af",
+                "aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS",
+                "-c:a", "aac", "-b:a", "192k",
+            ]
         else:
             command += ["-an"]
         command += [
@@ -220,15 +216,15 @@ def parser() -> argparse.ArgumentParser:
     sheet.add_argument("--interval", type=float, default=0.5, help="seconds between frames (default: 0.5)")
     sheet.add_argument("--columns", type=int, default=4)
 
-    edit = subcommands.add_parser("edit", help="trim a clip and prepend its title card")
+    edit = subcommands.add_parser("edit", help="trim a clip and overlay a two-line title at the bottom")
     edit.add_argument("video", type=Path)
     edit.add_argument("--output", "-o", type=Path, required=True)
     edit.add_argument("--start", type=float, required=True, help="first seated frame, in seconds")
     edit.add_argument("--name", required=True, help="climb name")
     edit.add_argument("--grade", required=True)
     edit.add_argument("--angle", required=True, help="for example 30 or 30°")
-    edit.add_argument("--sent", required=True, help="month and year, for example 'April 2026'")
-    edit.add_argument("--title-seconds", type=float, default=2.5)
+    edit.add_argument("--sent", required=True, help="display date, for example '8/26'")
+    edit.add_argument("--title-seconds", type=float, default=5.0, help="overlay duration (default: 5 seconds)")
     return root
 
 
@@ -245,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
             make_sheet(args.video, args.output, args.interval, args.columns)
         else:
             angle = args.angle if args.angle.endswith("°") else f"{args.angle}°"
-            edit_video(args.video, args.output, args.start, args.title_seconds, [args.name, f"{args.grade}  ·  {angle}", args.sent])
+            edit_video(args.video, args.output, args.start, args.title_seconds, [args.name, f"{args.grade}  ·  {angle}  ·  {args.sent}"])
         return 0
     except (VideoError, subprocess.CalledProcessError, json.JSONDecodeError) as error:
         print(f"error: {error}", file=sys.stderr)

@@ -237,14 +237,17 @@ python tools/prepare_send_video.py sheet input.mov \
   --output review/contact-sheet.jpg --interval 0.5
 ```
 
-Inspect the sheet, then trim at that timestamp and prepend a title card. The
+Inspect the sheet, then trim at that timestamp and overlay a two-line title box
+at the bottom for the first five seconds. Video and audio begin immediately;
+there is no separate intro segment. A frame from those five seconds can be
+selected as a cover with the title visible. The
 four title values below are examples and are supplied at runtime; no personal
 details or media are stored in the repository:
 
 ```sh
 python tools/prepare_send_video.py edit input.mov \
   --output ready/example-send.mp4 --start 3.5 \
-  --name "Example Climb" --grade V7 --angle 30 --sent "April 2026"
+  --name "Example Climb" --grade V7 --angle 30 --sent "8/26"
 ```
 
 The source file is never modified. Output is H.264/AAC MP4, inherited metadata
@@ -279,10 +282,9 @@ deploy. Before processing a real clip:
 7. Watch the complete output once before sharing it; confirm the cut, title,
    orientation, audio, and absence of private material.
 
-The code and unit tests are ready for review. The remaining release gate is an
-end-to-end run with a representative phone clip on a machine with FFmpeg; that
-could not be performed in the development container because its package and
-GitHub traffic are blocked by the environment proxy.
+The tool has been tested on a representative rotated phone clip on Windows.
+Review each result for title placement, orientation, timing, audio, and privacy
+before sharing. `--title-seconds` changes the five-second overlay duration.
 
 ## Bugs 🐞 and Feature Requests 🗒️
 
