@@ -250,8 +250,8 @@ python tools/prepare_send_video.py edit input.mov \
   --name "Example Climb" --grade V7 --angle 30 --sent "8/26"
 ```
 
-The details line uses a cool-to-warm grade spectrum: **V6 teal, V7 blue,
-V8 purple, V9 pink, V10 vivid red**. The climb name stays white on a dark navy
+The details line uses a heat grade spectrum: **V6 green, V7 lime,
+V8 yellow, V9 orange, V10 vivid red**. The climb name stays white on a dark navy
 box. The printed grade remains visible as well as its color. Lowercase grades
 and `+`/`-` variants use the same grade color; other grades use neutral gray.
 

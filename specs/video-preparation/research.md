@@ -94,7 +94,7 @@ modified. Clips shorter than the overlay duration end at their original trimmed
 length. Frames during the first five seconds include both the climb and title
 and can be used as cover images.
 
-Grade accents run from cool to warm: V6 teal, V7 blue, V8 purple, V9 pink,
+Grade accents use a heat spectrum: V6 green, V7 lime, V8 yellow, V9 orange,
 and V10 vivid red. This is a display convention, not an official grading color
 standard. The grade text stays visible so color is not the only difficulty cue.
 The climb name remains white, and unlisted grades use neutral gray.

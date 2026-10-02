@@ -26,10 +26,10 @@ from PIL import Image, ImageDraw, ImageFont
 
 # Cool-to-warm grade accents: higher grades use warmer, more saturated hues.
 GRADE_COLORS = {
-    "V6": "#67c5b5",   # teal
-    "V7": "#70b7f0",   # blue
-    "V8": "#b29bfa",   # purple
-    "V9": "#f487c5",   # pink
+    "V6": "#74d6a1",   # green
+    "V7": "#c7e879",   # lime
+    "V8": "#ffd45e",   # yellow
+    "V9": "#ffa064",   # orange
     "V10": "#ff6b6b",  # vivid red
 }
 
