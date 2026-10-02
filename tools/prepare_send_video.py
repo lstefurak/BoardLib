@@ -150,8 +150,9 @@ def make_sheet(video: Path, output: Path, interval: float, columns: int) -> None
         frames = sorted(Path(temporary).glob("*.jpg"))
         if not frames:
             raise VideoError("FFmpeg did not extract any frames")
-        sample = Image.open(frames[0])
-        tile_width, tile_height = sample.width, sample.height + 30
+        with Image.open(frames[0]) as sample:
+            tile_width, frame_height = sample.size
+        tile_height = frame_height + 30
         rows = math.ceil(len(frames) / columns)
         sheet = Image.new("RGB", (tile_width * columns, tile_height * rows), "white")
         draw = ImageDraw.Draw(sheet)
@@ -161,7 +162,7 @@ def make_sheet(video: Path, output: Path, interval: float, columns: int) -> None
                 x, y = index % columns * tile_width, index // columns * tile_height
                 sheet.paste(frame, (x, y))
                 seconds = index * interval
-                draw.text((x + 7, y + sample.height + 5), f"{seconds:.2f} s", fill="black", font=font)
+                draw.text((x + 7, y + frame_height + 5), f"{seconds:.2f} s", fill="black", font=font)
         output.parent.mkdir(parents=True, exist_ok=True)
         sheet.save(output)
     print(f"Wrote {output} ({len(frames)} frames across {info.duration:.2f} seconds)")

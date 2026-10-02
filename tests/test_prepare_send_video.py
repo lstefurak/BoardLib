@@ -71,3 +71,43 @@ def test_check_reports_dependencies_and_no_model_requirement(monkeypatch, capsys
     assert "ffmpeg version 7.0" in output
     assert "ffprobe version 7.0" in output
     assert "no LLM or API key" in output
+
+
+def test_sheet_closes_frame_handles_before_temporary_cleanup(monkeypatch, tmp_path):
+    opened_frames = []
+    temporary_paths = []
+    real_open = video.Image.open
+    real_temporary_directory = video.tempfile.TemporaryDirectory
+
+    class CheckedTemporaryDirectory(real_temporary_directory):
+        def __exit__(self, *args):
+            try:
+                assert opened_frames
+                assert all(frame.fp is None for frame in opened_frames)
+            finally:
+                super().__exit__(*args)
+
+    def track_open(path, *args, **kwargs):
+        frame = real_open(path, *args, **kwargs)
+        opened_frames.append(frame)
+        return frame
+
+    def extract_frames(command, capture=False):
+        directory = Path(command[-1]).parent
+        temporary_paths.append(directory)
+        for index in range(1, 3):
+            with video.Image.new("RGB", (320, 180), "red") as frame:
+                frame.save(directory / f"{index:05d}.jpg")
+        return completed()
+
+    monkeypatch.setattr(video, "probe_video", lambda path: video.VideoInfo(640, 360, 1, 30, False))
+    monkeypatch.setattr(video, "_run", extract_frames)
+    monkeypatch.setattr(video.Image, "open", track_open)
+    monkeypatch.setattr(video.tempfile, "TemporaryDirectory", CheckedTemporaryDirectory)
+
+    output = tmp_path / "review" / "sheet.jpg"
+    video.make_sheet(tmp_path / "clip.mov", output, interval=0.5, columns=2)
+
+    assert all(not directory.exists() for directory in temporary_paths)
+    with real_open(output) as sheet:
+        assert sheet.size == (640, 210)
