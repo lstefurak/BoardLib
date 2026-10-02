@@ -227,6 +227,70 @@ manifest with its media id so it can never be posted twice, and removed.
 
 See [the runbook](specs/instagram-publisher/runbook.md) for the end-to-end workflow, secrets, and troubleshooting, and [the research notes](specs/instagram-publisher/research.md) for the design history.
 
+### Preparing send videos
+
+The local video-preparation CLI makes a timestamped contact sheet so a human or
+vision-capable agent can select the first frame where the climber is seated:
+
+```sh
+python tools/prepare_send_video.py sheet input.mov \
+  --output review/contact-sheet.jpg --interval 0.5
+```
+
+Inspect the sheet, then trim at that timestamp and overlay a two-line title box
+at the bottom for the first five seconds. Video and audio begin immediately;
+there is no separate intro segment. A frame from those five seconds can be
+selected as a cover with the title visible. The
+four title values below are examples and are supplied at runtime; no personal
+details or media are stored in the repository:
+
+```sh
+python tools/prepare_send_video.py edit input.mov \
+  --output ready/example-send.mp4 --start 3.5 \
+  --name "Example Climb" --grade V7 --angle 30 --sent "8/26"
+```
+
+The details line uses a cool-to-warm grade spectrum: **V6 teal, V7 blue,
+V8 purple, V9 pink, V10 vivid red**. The climb name stays white on a dark navy
+box. The printed grade remains visible as well as its color. Lowercase grades
+and `+`/`-` variants use the same grade color; other grades use neutral gray.
+
+The source file is never modified. Output is H.264/AAC MP4, inherited metadata
+is removed, and clips without an audio stream are supported. Install the
+`ffmpeg` and `ffprobe` executables separately and use the existing Python/Pillow
+environment. See the [video tool research and limitations](specs/video-preparation/research.md)
+for the evaluated alternatives and rationale.
+
+**No LLM, API key, or paid AI plan is required.** The CLI runs entirely on the
+local machine with FFmpeg, ffprobe, and Pillow. The contact sheet is an ordinary
+JPEG, so it can optionally be inspected by Gemini, ChatGPT, another
+vision-capable model, or a person. The model is not called by this repository
+and therefore there is no expected model vendor or tier. If using an assistant,
+upload only the contact sheet—not the private source video—and ask it to return
+the earliest timestamp at which the climber is seated; confirm that timestamp
+yourself before passing it to `edit`.
+
+#### Readiness checklist
+
+This is a local command-line tool, not a hosted service, so there is nothing to
+deploy. Before processing a real clip:
+
+1. Install Python 3.8 or newer and create/activate a virtual environment.
+2. Install the repository dependencies with `python -m pip install -r requirements.txt`.
+3. Install FFmpeg using the package manager for the workstation (`brew install
+   ffmpeg` on macOS, `winget install Gyan.FFmpeg` on Windows, or `sudo apt
+   install ffmpeg` on Ubuntu/Debian).
+4. Run `python tools/prepare_send_video.py check`. Do not continue until it
+   reports versions for FFmpeg, ffprobe, and Pillow.
+5. Run `sheet`, inspect the JPEG, and note the earliest clearly seated timestamp.
+6. Run `edit` with that timestamp and the four title values.
+7. Watch the complete output once before sharing it; confirm the cut, title,
+   orientation, audio, and absence of private material.
+
+The tool has been tested on a representative rotated phone clip on Windows.
+Review each result for title placement, orientation, timing, audio, and privacy
+before sharing. `--title-seconds` changes the five-second overlay duration.
+
 ## Bugs 🐞 and Feature Requests 🗒️
 
 Please create an issue in the [issue tracker](https://github.com/lemeryfertitta/BoardLib/issues) to report bugs or request additional features. Contributions are welcome and appreciated.
