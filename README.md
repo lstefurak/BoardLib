@@ -237,8 +237,8 @@ python tools/prepare_send_video.py sheet input.mov \
   --output review/contact-sheet.jpg --interval 0.5
 ```
 
-Inspect the sheet, then trim at that timestamp and overlay a two-line title box
-at the bottom for the first five seconds. Video and audio begin immediately;
+Inspect the sheet, then trim at that timestamp and overlay a large title box
+inside the preview crop for the first five seconds. Video begins immediately;
 there is no separate intro segment. A frame from those five seconds can be
 selected as a cover with the title visible. The
 four title values below are examples and are supplied at runtime; no personal
@@ -250,13 +250,56 @@ python tools/prepare_send_video.py edit input.mov \
   --name "Example Climb" --grade V7 --angle 30 --sent "8/26"
 ```
 
-The details line uses a cool-to-warm grade spectrum: **V6 teal, V7 blue,
-V8 purple, V9 pink, V10 vivid red**. The climb name stays white on a dark navy
+The details line uses a heat grade spectrum: **V6 green, V7 lime,
+V8 yellow, V9 orange, V10 vivid red**. The climb name stays white on a dark navy
 box. The printed grade remains visible as well as its color. Lowercase grades
 and `+`/`-` variants use the same grade color; other grades use neutral gray.
 
-The source file is never modified. Output is H.264/AAC MP4, inherited metadata
-is removed, and clips without an audio stream are supported. Install the
+#### Reviewing send versus try
+
+The outcome-review tool creates a local page for the video folder. Each clip
+starts as `uncertain`; choose `send`, `fall / try`, or `uncertain`, record the
+seated start and end times, and download the review JSON. The logbook's send
+story appears as context only—it is never treated as proof that the video
+shows a top-out:
+
+```sh
+python tools/review_send_videos.py review videos \
+  --output tmp/video-outcome-review.html \
+  --manifest data/instagram-manifest.jsonl \
+  --no-sheets
+```
+
+The fast overview uses the native video timeline. Run `prepare_send_video.py
+sheet` on selected clips when timestamped thumbnails are useful. After the
+human review, click **Download review JSON** and save the edited handoff as
+`tmp/reviewed-outcomes.json`. Validate or apply that downloaded file:
+
+```sh
+python tools/review_send_videos.py apply tmp/reviewed-outcomes.json
+python tools/review_send_videos.py apply tmp/reviewed-outcomes.json \
+  --manifest data/instagram-manifest.jsonl
+```
+
+Applying review fields does not change posting status by default. Add
+`--approve-sends` and/or `--skip-falls` only after checking the decisions. The
+current workflow intentionally does not claim to infer a top-out from pixels;
+an occlusion-tolerant pose/fall model needs labeled examples and wall-specific
+calibration before it should be allowed to approve posts.
+
+The title spans 98% of the video width, uses up to two name rows, and prints
+the grade, angle, and date in a larger font than the name. Wrapped mirrored
+names end in `(mir)`; long second rows are shortened to `... (mir)`.
+The box defaults to the top of the preview area, 24% down the full video frame,
+so it stays visible in the phone grid while leaving the seated start clear.
+Use `--title-position bottom` for the alternative anchored at 28% above the
+bottom, where extra name rows grow upward. The top and bottom margin options
+enforce minimum clearance inside a centered square preview.
+Audio is removed by default; pass `--keep-audio` to retain it.
+
+The source file is never modified. Output is H.264 MP4 (with AAC when audio is
+retained), inherited metadata is removed, and clips without an audio stream are
+supported. Install the
 `ffmpeg` and `ffprobe` executables separately and use the existing Python/Pillow
 environment. See the [video tool research and limitations](specs/video-preparation/research.md)
 for the evaluated alternatives and rationale.
@@ -290,6 +333,20 @@ deploy. Before processing a real clip:
 The tool has been tested on a representative rotated phone clip on Windows.
 Review each result for title placement, orientation, timing, audio, and privacy
 before sharing. `--title-seconds` changes the five-second overlay duration.
+
+#### Batch preparation and upload
+
+The [reviewed-send workflow runbook](specs/video-preparation/runbook.md) covers
+label/outcome confirmation, verified silent exports, the finished-video gallery,
+and oldest-first token publishing with a separate resumable journal.
+
+```sh
+python tools/prepare_send_batch.py prepare \
+  --manifest data/instagram-manifest.jsonl --output-dir outputs/ready-sends
+python tools/publish_ready_sends.py \
+  --manifest data/instagram-manifest.jsonl \
+  --ledger data/instagram-publications.jsonl --execute
+```
 
 ## Bugs 🐞 and Feature Requests 🗒️
 

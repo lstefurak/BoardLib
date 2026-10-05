@@ -110,7 +110,9 @@ class MetaClient:
             raise PublishError(f"Meta API error{f' {code}' if code else ''}: {detail}")
         return payload
 
-    def create_reel_container(self, video_url: str, caption: str, share_to_feed: bool) -> str:
+    def create_reel_container(self, video_url: str, caption: str, share_to_feed: bool,
+                              *, cover_frame_ms: Optional[int] = None) -> str:
+        cover_fields = {} if cover_frame_ms is None else {"thumb_offset": cover_frame_ms}
         payload = self._call(
             "POST",
             f"{self.user_id}/media",
@@ -118,6 +120,7 @@ class MetaClient:
             video_url=video_url,
             caption=caption,
             share_to_feed="true" if share_to_feed else "false",
+            **cover_fields,
         )
         container_id = str(payload.get("id") or "")
         if not container_id:
@@ -226,6 +229,10 @@ def validate(record: dict[str, Any]) -> list[str]:
         problems.append("caption still contains the [ADD DESCRIPTION] placeholder")
     if len(caption) > MAX_CAPTION_CHARS:
         problems.append(f"caption is {len(caption)} characters; the limit is {MAX_CAPTION_CHARS}")
+    if "cover_frame_ms" in record and (type(record["cover_frame_ms"]) is not int or record["cover_frame_ms"] < 0):
+        problems.append("cover_frame_ms must be a non-negative integer")
+    if record.get("video_outcome") not in (None, "send"):
+        problems.append("reviewed video outcome is not a send")
     return problems
 
 
@@ -243,7 +250,8 @@ def publish_record(
     video = pathlib.Path(record["video_path"])
     key, url = stager.stage(video)
     try:
-        container_id = meta.create_reel_container(url, record["caption"], share_to_feed)
+        cover_options = {"cover_frame_ms": record["cover_frame_ms"]} if "cover_frame_ms" in record else {}
+        container_id = meta.create_reel_container(url, record["caption"], share_to_feed, **cover_options)
         record["container_id"] = container_id
         wait_for_container(meta, container_id, poll_interval, timeout, sleep=sleep, clock=clock)
         return meta.publish(container_id)
@@ -276,7 +284,10 @@ def main(
     parser.add_argument("--manifest", type=pathlib.Path, default=DEFAULT_MANIFEST)
     parser.add_argument("--execute", action="store_true", help="Actually upload and publish. Default is a dry run.")
     parser.add_argument("--limit", type=int, default=None, help="Publish at most this many clips this run.")
-    parser.add_argument("--share-to-feed", action=argparse.BooleanOptionalAction, default=True, help="Also show the Reel on the profile grid (default: yes).")
+    feed = parser.add_mutually_exclusive_group()
+    feed.add_argument("--share-to-feed", dest="share_to_feed", action="store_true", help="Also show the Reel on the profile grid (default).")
+    feed.add_argument("--no-share-to-feed", dest="share_to_feed", action="store_false", help="Do not show the Reel on the profile grid.")
+    parser.set_defaults(share_to_feed=True)
     parser.add_argument("--continue-on-error", action="store_true", help="Keep going after a clip fails (default: stop).")
     parser.add_argument("--api-version", default=DEFAULT_API_VERSION)
     parser.add_argument("--poll-interval", type=float, default=10.0, help="Seconds between processing-status checks.")

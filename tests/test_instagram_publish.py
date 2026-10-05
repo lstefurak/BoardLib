@@ -23,7 +23,8 @@ class FakeMeta:
         self.fail_create = fail_create
         self.calls = []
 
-    def create_reel_container(self, video_url, caption, share_to_feed):
+    def create_reel_container(self, video_url, caption, share_to_feed, *, cover_frame_ms=None):
+        self.cover_frame_ms = cover_frame_ms
         self.calls.append(("create", video_url, caption, share_to_feed))
         if self.fail_create:
             raise publish.PublishError(self.fail_create)
@@ -140,6 +141,27 @@ def test_rerun_skips_already_published_clips(manifest):
     assert run(manifest, "--execute", meta=meta2, stager=stager2) == 0
     assert meta2.calls == [] and stager2.staged == []
     assert sum(1 for r in read_manifest(manifest) if r.get("published_media_id")) == 2
+
+
+def test_manifest_cover_frame_reaches_the_publishing_request(manifest):
+    records = read_manifest(manifest)
+    records[0]["cover_frame_ms"] = 1000
+    publish.write_manifest(manifest, records)
+    meta = FakeMeta(statuses=["FINISHED"])
+    assert run(manifest, "--execute", meta=meta, stager=FakeStager()) == 0
+    assert meta.cover_frame_ms == 1000
+
+
+@pytest.mark.parametrize("offset", [-1, True, "1000"])
+def test_invalid_cover_frame_prevents_publishing(clips, offset):
+    record = {"video_path": str(clips[0]), "caption": "test", "cover_frame_ms": offset}
+    assert "cover_frame_ms must be a non-negative integer" in publish.validate(record)
+
+
+@pytest.mark.parametrize("outcome", ["fall", "uncertain"])
+def test_reviewed_non_send_cannot_be_uploaded(clips, outcome):
+    record = {"video_path": str(clips[0]), "caption": "Example", "video_outcome": outcome}
+    assert "reviewed video outcome is not a send" in publish.validate(record)
 
 
 def test_no_share_to_feed_flag_is_passed_through(manifest):
@@ -274,6 +296,14 @@ def test_meta_client_sends_token_in_body_and_surfaces_api_errors():
     assert (method, url) == ("GET", "https://graph.instagram.com/v23.0/container-9")
     assert kwargs["params"]["fields"] == "status_code,status"
     assert session.requests[2][1].endswith("/178/media_publish")
+
+
+def test_cover_frame_is_sent_to_meta_as_thumbnail_offset():
+    session = FakeSession([FakeResponse(200, {"id": "container-cover"})])
+    client = publish.MetaClient("178", "secret-token", session=session)
+    assert client.create_reel_container("https://x/y.mp4", "cap", True,
+                                        cover_frame_ms=1000) == "container-cover"
+    assert session.requests[0][2]["data"]["thumb_offset"] == 1000
 
 
 def test_s3_stager_uploads_presigns_and_deletes(tmp_path):
