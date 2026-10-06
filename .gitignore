@@ -19,3 +19,7 @@ docs/site.config.local.js
 *.local.sh
 # Local Google Photos Takeout clips for tools/instagram_board_publisher.py - never committed.
 videos/
+# Generated private video derivatives, reviews, and operator scratch files.
+outputs/
+work/
+.claude/

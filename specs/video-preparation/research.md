@@ -3,7 +3,7 @@
 ## Goal and boundary
 
 The repeatable job is to (1) identify the first frame where the climber is
-seated, (2) remove everything before it, and (3) overlay a two-line title box at the bottom for the first five seconds.
+seated, (2) remove everything before it, and (3) overlay a preview-safe title box for the first five seconds.
 The lines contain the climb name and the grade, wall angle, and compact date
 (for example `8/26`). The repository must not contain a
 specific person's identity or private media.
@@ -75,20 +75,32 @@ Any such result should remain a suggestion displayed on the contact sheet.
 
 ## Implemented pipeline
 
-`tools/prepare_send_video.py` has three subcommands:
+`tools/prepare_send_video.py` has three subcommands, and
+`tools/review_send_videos.py` adds the review handoff:
 
 1. `sheet` asks FFmpeg to sample the complete clip at a configurable interval,
    then Pillow lays the frames out with timestamps.
 2. `edit` uses ffprobe to discover display dimensions, duration, frame rate,
    rotation, and audio presence. Pillow renders a temporary translucent title
-   box with two lines. FFmpeg overlays it at the bottom of the trimmed clip
+   box with up to two name rows and a larger grade/angle/date row. FFmpeg overlays it in the trimmed clip
    while output time is less than five seconds (configurable with
-   `--title-seconds`). The video and its audio start immediately, with no added
-   intro or silent segment. Output is H.264/AAC with inherited metadata removed
+   `--title-seconds`). The box is 98% of the video width. Wrapped mirror names
+   end in `(mir)`, with `... (mir)` when the second row needs truncation.
+   The title defaults to the top of the preview crop with a 24% top margin.
+   `--title-position bottom` anchors it 28% above the bottom and extra rows
+   grow upward. Both margin options enforce a centered square preview minimum
+   with UI clearance. Audio is removed by
+   default; `--keep-audio` retains it. Video starts immediately, with no added
+   intro segment. Output is H.264 (with AAC when audio is retained), with inherited metadata removed
    and MP4 metadata at the front for streaming.
 3. `check` verifies FFmpeg, ffprobe, and Pillow before processing media.
+4. `review_send_videos.py review` creates a local review page for a folder of
+   clips. It stores a human-confirmed `video_outcome` (`send`, `fall`, or
+   `uncertain`), `start_seconds`, `end_seconds`, and notes in a downloadable
+   JSON handoff. `apply` can merge those fields into the Instagram manifest;
+   posting-status changes require explicit flags.
 
-Audio/video are re-encoded rather than stream-copied because the visual cut,
+Video and any retained audio are re-encoded rather than stream-copied because the visual cut,
 overlay, and dimension normalization require decoded frames. The source is never
 modified. Clips shorter than the overlay duration end at their original trimmed
 length. Frames during the first five seconds include both the climb and title
@@ -126,16 +138,21 @@ acceptable; local human review remains the privacy-preserving default.
 
 - Review the contact sheet at a smaller interval when the seated transition
   falls between samples. `--interval 0.1` gives ten candidates per second.
-- The title text currently fits each supplied line by shrinking a shared font;
-  extremely long names may become small rather than wrapping.
+- Titles keep a large name font and use up to two rows; long names are shortened
+  on the second row. The grade, angle, and date use a larger font and must fit.
 - FFmpeg's automatic rotation plus the explicit output canvas handles common
   phone rotation metadata, but unusual anamorphic or variable-frame-rate input
   should be visually checked.
 - Output metadata is stripped, but pixels and audio can still reveal private
   information. Review the final file before sharing it.
-- Batch manifest integration is a natural follow-up: store a reviewed
-  `start_seconds` beside each planned post, then invoke this tool for approved
-  records. It should not overwrite source paths or publish without review.
+- The review handoff now stores a reviewed `start_seconds` beside each planned
+  post, then can update approved records explicitly. It does not overwrite
+  source paths or publish without review.
+- Automatic send/fall inference remains intentionally disabled. A useful model
+  would need person/pose tracking, finish-zone calibration, fall-event logic,
+  and labeled clips from this wall. Until those are available, the page keeps
+  `uncertain` as a first-class answer instead of turning a logbook match into
+  false video evidence.
 
 ## Release readiness
 
@@ -148,7 +165,7 @@ check title placement, timing, orientation, audio, and privacy.
 
 There is no cloud deployment or Gemini setup. Install FFmpeg and the Python
 dependencies, run `check`, process a sample, and watch the result before sharing.
-Audio is normalized to stereo at 48 kHz without inserting silence or shifting
+Retained audio is normalized to stereo at 48 kHz without inserting silence or shifting
 the clip to make room for a separate title card.
 
 ## Research environment note
