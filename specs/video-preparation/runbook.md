@@ -43,6 +43,9 @@ The handoff validates numeric bounds and completed review timestamps before
 writing. Confirming a label clears its pending-confirmation flag. Existing
 published records keep their publication status and IDs. Outcome review alone
 does not approve an unresolved label. Uncertain clips remain excluded.
+An explicit label rejection stays unchecked when the review page is regenerated,
+including when older saved decisions are restored. Confirm the checkbox again
+only after checking the current label.
 
 Relative media paths are resolved against the JSON file containing them. A
 minimal reviewed input record can look like this; the actual review tool also
@@ -133,7 +136,10 @@ The account is verified before any upload. The optional username guard catches
 an unintended account configuration. Sends upload in capture-date order and
 appear in both Reels and the main profile grid. The cover is selected while
 the title is visible. Source/output hashes and current review decisions are
-checked before publishing.
+checked before publishing. Current trim and title fields must match the saved
+render configuration. If a new review changes the start or label, prepare a new
+export before publishing; unchanged file hashes alone do not establish that the
+export contains the newly requested edit.
 
 The uploader writes only the publication journal; it never rewrites the
 preparation manifest. Preparation and upload can run together using that

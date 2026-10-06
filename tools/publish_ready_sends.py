@@ -32,6 +32,8 @@ from instagram_publish import (
     DEFAULT_API_VERSION, MetaClient, S3Stager, load_dotenv, now_iso,
     read_manifest, validate, wait_for_container,
 )
+from prepare_send_batch import configuration as preparation_configuration
+from prepare_send_video import VideoError
 
 
 class BatchStop(RuntimeError):
@@ -260,6 +262,7 @@ def verify_prepared(record: Dict[str, Any]) -> None:
         raise BatchStop("the clip has incomplete or failed preparation checks")
     if record.get("title_position") != "top" or record.get("audio_removed") is not True:
         raise BatchStop("the clip must use the approved top title and silent audio")
+    render_configuration(record)
     if validate(record):
         raise BatchStop("the prepared video or caption failed upload validation")
     for field, path_field in (("source_sha256", "source_video_path"), ("output_sha256", "video_path")):
@@ -267,6 +270,28 @@ def verify_prepared(record: Dict[str, Any]) -> None:
         path = Path(str(record.get(path_field) or ""))
         if not isinstance(expected, str) or len(expected) != 64 or not path.is_file() or digest(path) != expected:
             raise BatchStop("the source or prepared output changed after verification")
+
+
+def render_configuration(record: Dict[str, Any]) -> Dict[str, Any]:
+    """Verify current edits against the canonical configuration used to render."""
+    prepared = record.get("preparation_config")
+    if not isinstance(prepared, dict) or not prepared:
+        raise BatchStop("the prepared clip needs a verifiable preparation_config; prepare it again")
+    try:
+        current = preparation_configuration(
+            record, float(record["title_seconds"]), record["title_position"],
+            float(record["title_top_margin_percent"]), float(record["title_bottom_margin_percent"]),
+        )
+    except (KeyError, TypeError, ValueError, OverflowError, VideoError) as error:
+        raise BatchStop("the current render configuration is incomplete or invalid; prepare it again") from error
+    # These dates document the review and capture. Their visible effect, if any,
+    # is already represented by the canonical display_date label.
+    informational = {"taken_at", "video_reviewed_at"}
+    rendered = {field: value for field, value in prepared.items() if field not in informational}
+    current_render = {field: value for field, value in current.items() if field not in informational}
+    if rendered != current_render:
+        raise BatchStop("the trim or label changed after preparation; prepare the clip again")
+    return current_render
 
 
 def cleanup_staging(stager: S3Stager, ledger: Ledger, key: str) -> None:
@@ -331,9 +356,9 @@ def recovery_record(plan: Path, key: str, entry: Dict[str, Any]) -> Dict[str, An
     if current is None:
         raise BatchStop("the journaled source is no longer in the render plan")
     verify_prepared(current)
-    unchanged = ("caption", "source_sha256", "output_sha256", "start_seconds",
-                 "climb_name", "grade", "angle", "title_position", "audio_removed", "preparation_config")
-    if any(current.get(field) != entry.get(field) for field in unchanged):
+    unchanged = ("caption", "source_sha256", "output_sha256")
+    if (any(current.get(field) != entry.get(field) for field in unchanged)
+            or render_configuration(current) != render_configuration(entry)):
         raise BatchStop("the source, output, caption, or edit changed after its container was created")
     return current
 

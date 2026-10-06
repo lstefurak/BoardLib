@@ -66,7 +66,7 @@ def _source_identity(video: Path) -> str:
 
 
 def _label_confirmed(record: dict[str, Any] | None) -> bool:
-    if not record or record.get("status") in {"check_climb", "unmatched"}:
+    if not record or record.get("label_confirmed") is False or record.get("status") in {"check_climb", "unmatched"}:
         return False
     return record.get("label_confirmed") is True or record.get("match_method") == "description"
 
@@ -146,6 +146,7 @@ def _review_record(
         "caption": (manifest_record or {}).get("caption"),
         "logbook_hint": _logbook_hint(manifest_record),
         "label_confirmed": _label_confirmed(manifest_record),
+        "label_rejected": (manifest_record or {}).get("label_confirmed") is False,
         "outcome": "uncertain",
         "start_seconds": 0.0,
         "end_seconds": duration,
@@ -300,7 +301,11 @@ function mergeDecision(saved) {{
   if (saved.start_seconds >= saved.end_seconds || typeof saved.notes !== "string" || typeof saved.label_confirmed !== "boolean") return;
   if (saved.reviewed_at !== null && (typeof saved.reviewed_at !== "string" || !/(Z|[+-]\\d{{2}}:\\d{{2}})$/.test(saved.reviewed_at) || !Number.isFinite(Date.parse(saved.reviewed_at)))) return;
   if (saved.outcome !== "uncertain" && !saved.reviewed_at) return;
-  for (const field of DECISION_FIELDS) record[field] = saved[field];
+  for (const field of DECISION_FIELDS) {{
+    // A current manifest rejection needs a new, deliberate checkbox confirmation.
+    if (field === "label_confirmed" && record.label_rejected && saved[field] === true) continue;
+    record[field] = saved[field];
+  }}
 }}
 try {{
   const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{{}}");

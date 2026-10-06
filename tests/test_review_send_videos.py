@@ -224,6 +224,56 @@ def test_unconfirmed_label_keeps_its_confirmation_flag(tmp_path):
     assert record["needs_label_confirmation"] is True
 
 
+def test_regenerated_review_keeps_rejected_description_match_unconfirmed(monkeypatch, tmp_path):
+    source_dir = tmp_path / "videos"
+    source_dir.mkdir()
+    video = source_dir / "clip.mp4"
+    video.write_bytes(b"video")
+    manifest = tmp_path / "manifest.jsonl"
+    manifest.write_text(json.dumps({"video_path": str(video), "status": "ready",
+                                    "match_method": "description", "label_confirmed": False}) + "\n", encoding="utf-8")
+    monkeypatch.setattr(review, "probe_video", lambda path: review.VideoInfo(640, 360, 5, 30, False))
+    records = review.create_review_page(source_dir, tmp_path / "review.html", manifest=manifest, sheets=False)
+    assert records[0]["label_confirmed"] is False
+    assert records[0]["label_rejected"] is True
+    generated = json.loads((tmp_path / "review.json").read_text(encoding="utf-8"))["reviews"][0]
+    assert generated["label_confirmed"] is False
+
+
+@pytest.mark.parametrize("approve", [False, True])
+def test_apply_without_explicit_confirmation_preserves_rejected_description_match(tmp_path, approve):
+    video = tmp_path / "clip.mp4"
+    manifest = tmp_path / "manifest.jsonl"
+    original = json.dumps({"video_path": str(video), "status": "ready", "match_method": "description",
+                           "label_confirmed": False, "needs_label_confirmation": True}) + "\n"
+    manifest.write_text(original, encoding="utf-8")
+    decision = confirmed_review(video)
+    decision.pop("label_confirmed")
+    handoff = write_review(tmp_path, [decision])
+    if approve:
+        with pytest.raises(ValueError, match="confirm the climb label"):
+            review.apply_reviews(handoff, manifest=manifest, approve_sends=True)
+        assert manifest.read_text(encoding="utf-8") == original
+    else:
+        review.apply_reviews(handoff, manifest=manifest)
+        record = json.loads(manifest.read_text(encoding="utf-8"))
+        assert record["label_confirmed"] is False
+        assert record["needs_label_confirmation"] is True
+        assert record["status"] == "ready"
+
+
+def test_explicit_handoff_can_reconfirm_a_rejected_description_match(tmp_path):
+    video = tmp_path / "clip.mp4"
+    manifest = tmp_path / "manifest.jsonl"
+    manifest.write_text(json.dumps({"video_path": str(video), "status": "ready", "match_method": "description",
+                                    "label_confirmed": False, "needs_label_confirmation": True}) + "\n", encoding="utf-8")
+    review.apply_reviews(write_review(tmp_path, [confirmed_review(video)]), manifest=manifest, approve_sends=True)
+    record = json.loads(manifest.read_text(encoding="utf-8"))
+    assert record["label_confirmed"] is True
+    assert record["needs_label_confirmation"] is False
+    assert record["status"] == "approved"
+
+
 def test_apply_matches_prepared_source_and_resolves_relative_paths_at_each_json(tmp_path):
     data = tmp_path / "data"
     data.mkdir()
@@ -304,4 +354,62 @@ assert.equal(state[original.id].video_href, original.video_href);
 assert.equal(state[original.id].video_path, original.video_path);
 """
     subprocess.run([shutil.which("node"), "-"], input=state_script + checks,
+                   check=True, capture_output=True, text=True)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node is optional for the browser-state behavior check")
+def test_browser_rejection_survives_saved_state_and_import_until_checkbox_reconfirmation(monkeypatch, tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"video")
+    monkeypatch.setattr(review, "probe_video", lambda path: review.VideoInfo(640, 360, 5, 30, False))
+    record = review._review_record(1, source, None,
+                                  {"status": "ready", "match_method": "description", "label_confirmed": False},
+                                  tmp_path / "index.html")
+    page = review._page([record], "2026-10-02T12:00:00+00:00")
+    script = page.split("<script>", 1)[1].split("</script>", 1)[0]
+    setup = "const currentRecord = " + json.dumps(record) + ";\n" + """
+const assert = require('assert').strict;
+const savedDecision = { ...currentRecord, outcome: 'send', start_seconds: 1, end_seconds: 4,
+  notes: 'Previously reviewed', reviewed_at: '2026-10-02T12:00:00+00:00',
+  label_confirmed: true, label_rejected: false };
+let persisted = null;
+const localStorage = {
+  getItem: () => JSON.stringify({ [currentRecord.id]: savedDecision }),
+  setItem: (key, value) => { persisted = JSON.parse(value); }
+};
+const inputHandlers = {};
+const checkbox = {
+  type: 'checkbox', dataset: { field: 'label_confirmed' }, checked: false,
+  addEventListener: (event, handler) => { inputHandlers[event] = handler; },
+  closest: () => ({ dataset: { id: currentRecord.id } })
+};
+const card = { dataset: { id: currentRecord.id },
+  querySelectorAll: selector => selector === '[data-field]' ? [checkbox] : [] };
+const elements = {};
+const document = {
+  querySelectorAll: selector => selector === '[data-field]' ? [checkbox]
+    : selector === '.clip-card' ? [card] : [],
+  getElementById: id => elements[id] || (elements[id] = {
+    handlers: {}, addEventListener(event, handler) { this.handlers[event] = handler; }
+  })
+};
+class FileReader {
+  readAsText(file) { this.result = JSON.stringify(file.payload); this.onload(); }
+}
+function alert(message) { throw new Error(message); }
+"""
+    checks = """
+assert.equal(state[currentRecord.id].outcome, 'send');
+assert.equal(state[currentRecord.id].label_rejected, true);
+assert.equal(state[currentRecord.id].label_confirmed, false);
+assert.equal(checkbox.checked, false);
+elements.import.handlers.change({ target: { files: [{ payload: { reviews: [savedDecision] } }] } });
+assert.equal(state[currentRecord.id].label_confirmed, false);
+assert.equal(checkbox.checked, false);
+checkbox.checked = true;
+inputHandlers.input();
+assert.equal(state[currentRecord.id].label_confirmed, true);
+assert.equal(persisted[currentRecord.id].label_confirmed, true);
+"""
+    subprocess.run([shutil.which("node"), "-"], input=setup + script + checks,
                    check=True, capture_output=True, text=True)

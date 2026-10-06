@@ -26,12 +26,15 @@ def clip(tmp_path, name="first", taken_at="2025-01-01T12:00:00+00:00"):
     source, output = tmp_path / (name + "-source.mp4"), tmp_path / (name + ".mp4")
     source.write_bytes(b"original video " + name.encode())
     output.write_bytes(b"prepared video " + name.encode())
-    return {
+    record = {
         "source_video_path": str(source), "video_path": str(output),
         "climb_name": name, "caption": name + " V7 at 30 degrees",
         "taken_at": taken_at, "status": "approved", "video_outcome": "send",
         "video_reviewed_at": "2025-02-01T00:00:00+00:00", "label_confirmed": True,
         "prepared": True, "title_position": "top", "audio_removed": True,
+        "start_seconds": 2.0, "title_seconds": 5.0,
+        "title_top_margin_percent": 24.0, "title_bottom_margin_percent": 28.0,
+        "grade": "V7", "angle": "30",
         "source_sha256": publish.digest(source), "output_sha256": publish.digest(output),
         "cover_frame_ms": 1000,
         "checks": dict.fromkeys([
@@ -39,6 +42,8 @@ def clip(tmp_path, name="first", taken_at="2025-01-01T12:00:00+00:00"):
             "no_audio", "full_decode_passed",
         ], True),
     }
+    record["preparation_config"] = publish.preparation_configuration(record, 5.0, "top", 24.0, 28.0)
+    return record
 
 
 class FakeMeta:
@@ -370,7 +375,8 @@ def test_plan_and_journal_cannot_be_the_same_file(tmp_path):
 
 
 def test_naive_capture_date_is_rejected(tmp_path):
-    record = clip(tmp_path, taken_at="2025-01-01T12:00:00")
+    record = clip(tmp_path)
+    record["taken_at"] = "2025-01-01T12:00:00"
     with pytest.raises(publish.BatchStop, match="timezone"):
         publish.plan_records(write(tmp_path / "plan.jsonl", [record]))
 
@@ -470,7 +476,8 @@ def test_wait_supports_original_only_video_path_before_rendering(tmp_path):
 
 
 def test_mixed_manifest_skips_falls_uncertain_and_unapproved_clips(tmp_path):
-    fall = clip(tmp_path, "fall", "invalid date never enters the queue")
+    fall = clip(tmp_path, "fall")
+    fall["taken_at"] = "invalid date never enters the queue"
     fall["video_outcome"] = "fall"
     uncertain = clip(tmp_path, "uncertain")
     uncertain["video_outcome"] = "uncertain"
@@ -578,3 +585,112 @@ def test_published_plan_still_finishes_journal_verification_and_cleanup(tmp_path
     assert run(plan, path, "--execute", meta=meta, stager=stager) == 0
     assert stager.deleted and publish.Ledger(path).records[0]["publication_verified"]
     assert sum(call[0] == "publish" for call in meta.calls) == 1
+
+
+@pytest.mark.parametrize("field,value", [
+    ("start_seconds", 4.0), ("climb_name", "Corrected climb"), ("grade", "V8"),
+    ("angle", "40"), ("display_date", "1/2"), ("title_seconds", 7.0),
+    ("title_top_margin_percent", 30.0), ("title_bottom_margin_percent", 35.0),
+])
+def test_edited_prepared_metadata_cannot_publish_an_unchanged_export(tmp_path, field, value):
+    record = clip(tmp_path)
+    record[field] = value
+    plan, ledger = write(tmp_path / "plan.jsonl", [record]), tmp_path / "journal.jsonl"
+    meta, stager = FakeMeta(), FakeStager()
+    assert run(plan, ledger, "--execute", meta=meta, stager=stager) == 1
+    assert not stager.staged and not ledger.exists()
+    assert not any(call[0] in {"create", "publish"} for call in meta.calls)
+
+
+@pytest.mark.parametrize("caption", ["first V7 at 30 degrees (mirror)", "first V7 at 30 degrees (mir)"])
+def test_caption_derived_mirror_change_requires_preparation(tmp_path, caption):
+    record = clip(tmp_path)
+    record["caption"] = caption
+    with pytest.raises(publish.BatchStop, match="trim or label changed"):
+        publish.verify_prepared(record)
+
+
+@pytest.mark.parametrize("caption", ['"first" V8 @ 30°', '"first" V7 @ 40°'])
+def test_caption_derived_grade_or_angle_change_requires_preparation(tmp_path, caption):
+    record = clip(tmp_path)
+    record.pop("grade")
+    record.pop("angle")
+    record["caption"] = '"first" V7 @ 30°'
+    record["preparation_config"] = publish.preparation_configuration(record, 5.0, "top", 24.0, 28.0)
+    record["caption"] = caption
+    with pytest.raises(publish.BatchStop, match="trim or label changed"):
+        publish.verify_prepared(record)
+
+
+@pytest.mark.parametrize("date_field", ["taken_at", "matched_log_at"])
+def test_changed_fallback_display_date_requires_preparation(tmp_path, date_field):
+    record = clip(tmp_path)
+    if date_field == "matched_log_at":
+        record[date_field] = record.pop("taken_at")
+    record[date_field] = "2025-01-02T12:00:00+00:00"
+    with pytest.raises(publish.BatchStop, match="trim or label changed"):
+        publish.verify_prepared(record)
+
+
+@pytest.mark.parametrize("config", [None, {}, "unverified", {"start_seconds": 2.0}])
+def test_missing_or_incomplete_render_configuration_blocks_upload(tmp_path, config):
+    record = clip(tmp_path)
+    if config is None:
+        record.pop("preparation_config")
+    else:
+        record["preparation_config"] = config
+    plan, ledger = write(tmp_path / "plan.jsonl", [record]), tmp_path / "journal.jsonl"
+    meta, stager = FakeMeta(), FakeStager()
+    assert run(plan, ledger, "--execute", meta=meta, stager=stager) == 1
+    assert not stager.staged and not any(call[0] in {"create", "publish"} for call in meta.calls)
+
+
+@pytest.mark.parametrize("field", ["title_seconds", "title_top_margin_percent", "title_bottom_margin_percent"])
+def test_missing_current_title_controls_are_not_inferred_from_the_old_render(tmp_path, field):
+    record = clip(tmp_path)
+    record.pop(field)
+    with pytest.raises(publish.BatchStop, match="configuration is incomplete or invalid"):
+        publish.verify_prepared(record)
+
+
+@pytest.mark.parametrize("change", ["start", "name", "mirror", "missing_config"])
+def test_recovery_rejects_stale_export_even_when_journal_copies_the_new_review(tmp_path, change):
+    record = clip(tmp_path)
+    if change == "start":
+        record["start_seconds"] = 4.0
+    elif change == "name":
+        record["climb_name"] = "Corrected climb"
+    elif change == "mirror":
+        record["caption"] += " (mirror)"
+    else:
+        record.pop("preparation_config")
+    plan, ledger = write(tmp_path / "plan.jsonl", [record]), tmp_path / "journal.jsonl"
+    # Current and journal metadata agree; both still describe bytes rendered
+    # using the old configuration. Comparing the two records alone misses it.
+    attempt(plan, ledger, record, "container_created", container_id="pending-container")
+    meta, stager = FakeMeta(), FakeStager()
+    assert run(plan, ledger, "--execute", meta=meta, stager=stager) == 1
+    assert not stager.staged and not any(call[0] in {"create", "publish"} for call in meta.calls)
+    assert publish.Ledger(ledger).records[0]["container_id"] == "pending-container"
+
+
+def test_non_render_review_updates_and_equivalent_edit_values_remain_publishable(tmp_path):
+    record = clip(tmp_path)
+    record.update(video_reviewed_at="2025-02-02T00:00:00Z", review_notes="Confirmed both hands at finish",
+                  taken_at="2025-01-01T13:00:00+01:00", start_seconds="2.0", climb_name="  first  ")
+    record["caption"] += "\nConfirmed finish."
+    publish.verify_prepared(record)
+
+
+def test_non_render_review_updates_allow_recovery_without_another_upload(tmp_path):
+    record = clip(tmp_path)
+    plan, ledger = write(tmp_path / "plan.jsonl", [record]), tmp_path / "journal.jsonl"
+    attempt(plan, ledger, record, "container_created", container_id="pending-container")
+    record["video_reviewed_at"] = "2025-02-02T00:00:00Z"
+    record["preparation_config"]["video_reviewed_at"] = record["video_reviewed_at"]
+    record["review_notes"] = "Rechecked finish"
+    write(plan, [record])
+    meta, stager = FakeMeta(), FakeStager()
+    meta.captions["pending-container"] = record["caption"]
+    assert run(plan, ledger, "--execute", meta=meta, stager=stager) == 0
+    assert not stager.staged and ("publish", "pending-container") in meta.calls
